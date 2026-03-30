@@ -589,7 +589,7 @@
             ;; Set palette index 1 (red) to a known color via set-palette
             (let ((rest (apply #'concat (make-list 14 "#000000"))))
               (ghostel--set-palette term
-                                   (concat "#000000" "#ff0000" rest)))
+                                    (concat "#000000" "#ff0000" rest)))
             ;; Write red text (SGR 31 = ANSI red = palette index 1)
             (ghostel--write-input term "\e[31mRED\e[0m")
             (ghostel--redraw term)
@@ -690,7 +690,33 @@
       (ghostel--detect-urls))
     (ghostel-test--assert-equal "url strips trailing dot"
                                 "https://example.com/path"
-                                (get-text-property 5 'help-echo))))
+                                (get-text-property 5 'help-echo)))
+  ;; File:line detection with absolute path (use ghostel.el which always exists)
+  (let ((test-file (expand-file-name "ghostel.el"
+                                     (file-name-directory (or load-file-name default-directory)))))
+    (with-temp-buffer
+      (insert (format "Error at %s:42 bad" test-file))
+      (let ((ghostel-enable-url-detection t))
+        (ghostel--detect-urls))
+      (let ((he (get-text-property 10 'help-echo)))
+        (ghostel-test--assert "file:line help-echo set"
+                              (and he (string-prefix-p "fileref:" he)))
+        (ghostel-test--assert "file:line contains line number"
+                              (and he (string-suffix-p ":42" he)))))
+    ;; File:line for non-existent file produces no link
+    (with-temp-buffer
+      (insert "Error at /no/such/file.el:10 bad")
+      (let ((ghostel-enable-url-detection t))
+        (ghostel--detect-urls))
+      (ghostel-test--assert "nonexistent file:line no help-echo"
+                            (null (get-text-property 10 'help-echo))))
+    ;; ghostel--open-link dispatches fileref:
+    (let ((opened nil))
+      (cl-letf (((symbol-function 'find-file-other-window)
+                 (lambda (f) (setq opened f))))
+        (ghostel--open-link (format "fileref:%s:10" test-file)))
+      (ghostel-test--assert-equal "fileref opens correct file"
+                                  test-file opened))))
 
 ;; -----------------------------------------------------------------------
 ;; Runner

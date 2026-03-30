@@ -803,9 +803,18 @@ stripped so the copied text matches the original terminal content."
 
 (defun ghostel--open-link (url)
   "Open URL, dispatching by scheme.
-file:// URIs open in Emacs; http(s) and other schemes use `browse-url'."
+file:// URIs open in Emacs; http(s) and other schemes use `browse-url'.
+fileref: URIs (from auto-detected file:line patterns) open the file
+at the given line in another window."
   (when (and url (stringp url))
     (cond
+     ((string-match "\\`fileref:\\(.*\\):\\([0-9]+\\)\\'" url)
+      (let ((file (match-string 1 url))
+            (line (string-to-number (match-string 2 url))))
+        (when (file-exists-p file)
+          (find-file-other-window file)
+          (goto-char (point-min))
+          (forward-line (1- line)))))
      ((string-match "\\`file://\\(?:localhost\\)?\\(/.*\\)" url)
       (find-file (url-unhex-string (match-string 1 url))))
      ((string-match-p "\\`[a-z]+://" url)
@@ -823,10 +832,11 @@ file:// URIs open in Emacs; http(s) and other schemes use `browse-url'."
   (ghostel--open-link (get-text-property (point) 'help-echo)))
 
 (defun ghostel--detect-urls ()
-  "Scan the buffer for plain-text URLs and apply hyperlink properties.
+  "Scan the buffer for plain-text URLs and file:line references.
 Skips regions that already have a `help-echo' property (e.g. from OSC 8)."
   (when ghostel-enable-url-detection
     (save-excursion
+      ;; Pass 1: http(s) URLs
       (goto-char (point-min))
       (while (re-search-forward
               "https?://[^ \t\n\r\"<>]*[^ \t\n\r\"<>.,;:!?)>]"
@@ -837,7 +847,25 @@ Skips regions that already have a `help-echo' property (e.g. from OSC 8)."
             (let ((url (match-string-no-properties 0)))
               (put-text-property beg end 'help-echo url)
               (put-text-property beg end 'mouse-face 'highlight)
-              (put-text-property beg end 'keymap ghostel-link-map))))))))
+              (put-text-property beg end 'keymap ghostel-link-map)))))
+      ;; Pass 2: file:line references (e.g. "./foo.el:42" or "/tmp/bar.rs:10")
+      (goto-char (point-min))
+      (while (re-search-forward
+              "\\(?:\\./\\|/\\)[^ \t\n\r:\"<>]+:[0-9]+"
+              nil t)
+        (let ((beg (match-beginning 0))
+              (end (match-end 0)))
+          (unless (get-text-property beg 'help-echo)
+            (let* ((text (match-string-no-properties 0))
+                   (sep (string-match ":[0-9]+\\'" text))
+                   (path (substring text 0 sep))
+                   (line (substring text (1+ sep)))
+                   (abs-path (expand-file-name path)))
+              (when (file-exists-p abs-path)
+                (put-text-property beg end 'help-echo
+                                   (concat "fileref:" abs-path ":" line))
+                (put-text-property beg end 'mouse-face 'highlight)
+                (put-text-property beg end 'keymap ghostel-link-map)))))))))
 
 ;;; Callbacks from native module
 
