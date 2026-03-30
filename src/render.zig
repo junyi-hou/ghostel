@@ -385,4 +385,17 @@ pub fn redraw(env: emacs.Env, term: *Terminal) void {
         _ = env.call1(env.intern("forward-line"), env.makeInteger(@as(i64, cy)));
         _ = env.call1(env.intern("move-to-column"), env.makeInteger(@as(i64, cx)));
     }
+
+    // Update cursor style
+    var cursor_visible: bool = true;
+    _ = gt.c.ghostty_render_state_get(term.render_state, gt.RS_DATA_CURSOR_VISIBLE, @ptrCast(&cursor_visible));
+
+    var cursor_style: c_int = gt.CURSOR_BLOCK;
+    _ = gt.c.ghostty_render_state_get(term.render_state, gt.RS_DATA_CURSOR_VISUAL_STYLE, @ptrCast(&cursor_style));
+
+    _ = env.call2(
+        env.intern("ghostel--set-cursor-style"),
+        env.makeInteger(@as(i64, cursor_style)),
+        if (cursor_visible) env.t() else env.nil(),
+    );
 }
