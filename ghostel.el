@@ -1220,10 +1220,14 @@ PROCESS is the shell process, EVENT describes the state change."
     ;; stty echo: bash-only — readline buffers its own echo, so we
     ;; need PTY-level echo.  When bash integration is active, the
     ;; integration script handles echo; we still set iutf8 here.
-    (if (and (eq (ghostel--detect-shell ghostel-shell) 'bash)
-             (not integration-env))
-        (process-send-string proc "stty iutf8 echo\n")
-      (process-send-string proc "stty iutf8\n"))
+    ;; Leading space keeps it out of history (HISTCONTROL=ignorespace).
+    ;; The clear-screen sequence (\e[H\e[2J) hides the command itself.
+    (let ((stty-cmd (if (and (eq (ghostel--detect-shell ghostel-shell) 'bash)
+                             (not integration-env))
+                        "stty iutf8 echo"
+                      "stty iutf8")))
+      (process-send-string
+       proc (concat " " stty-cmd "; printf '\\e[H\\e[2J'\n")))
     proc))
 
 ;;; Rendering
