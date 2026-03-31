@@ -373,7 +373,8 @@
 (defun ghostel-test-update-directory ()
   "Test OSC 7 directory tracking helper."
   (message "--- update-directory ---")
-  (let ((ghostel--last-directory nil))
+  (let ((ghostel--last-directory nil)
+        (default-directory default-directory))  ; preserve original
     ;; Plain path
     (ghostel--update-directory "/tmp")
     (ghostel-test--assert-equal "plain path" "/tmp/" default-directory)
