@@ -90,6 +90,9 @@ pub const Env = struct {
             }
             return buf[0..0];
         }
+        // Clear the non-local exit so callers (e.g. extractStringAlloc
+        // fallback) can make further API calls.
+        self.raw.non_local_exit_clear.?(self.raw);
         return null;
     }
 

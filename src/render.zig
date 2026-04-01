@@ -619,6 +619,7 @@ pub fn redraw(env: emacs.Env, term: *Terminal, force_full: bool) void {
     // positioning always runs so that cursor-only movements are visible.
     var dirty: c_int = gt.DIRTY_FALSE;
     _ = gt.c.ghostty_render_state_get(term.render_state, gt.RS_DATA_DIRTY, @ptrCast(&dirty));
+    var has_hyperlinks: bool = false;
 
     if (dirty != gt.DIRTY_FALSE) {
         // Get default colors
@@ -672,6 +673,16 @@ pub fn redraw(env: emacs.Env, term: *Terminal, force_full: bool) void {
                 row_count += 1;
                 prev_wrapped = false;
                 continue;
+            }
+
+            // Check for hyperlinks (row-level flag, may have false positives)
+            if (!has_hyperlinks) {
+                var raw_row: gt.c.GhosttyRow = undefined;
+                if (gt.c.ghostty_render_state_row_get(term.row_iterator, gt.c.GHOSTTY_RENDER_STATE_ROW_DATA_RAW, @ptrCast(&raw_row)) == gt.SUCCESS) {
+                    var row_has_links: bool = false;
+                    _ = gt.c.ghostty_row_get(raw_row, gt.ROW_DATA_HYPERLINK, @ptrCast(&row_has_links));
+                    if (row_has_links) has_hyperlinks = true;
+                }
             }
 
             if (partial) {
@@ -746,16 +757,21 @@ pub fn redraw(env: emacs.Env, term: *Terminal, force_full: bool) void {
         _ = gt.c.ghostty_render_state_set(term.render_state, gt.RS_OPT_DIRTY, @ptrCast(&dirty_false));
     }
 
-    // Scan for hyperlinks and apply text properties (before cursor positioning)
-    if (dirty != gt.DIRTY_FALSE) {
+    // Scan for hyperlinks and apply text properties (before cursor positioning).
+    // Only run the expensive HTML formatter when a viewport row actually has
+    // a hyperlink — this avoids formatting the entire terminal (including
+    // scrollback) on every redraw.
+    if (dirty != gt.DIRTY_FALSE and has_hyperlinks) {
         var hl_spans: [128]HyperlinkSpan = undefined;
         var hl_uri_buf: [8192]u8 = undefined;
         const hl = scanHyperlinks(term, &hl_spans, &hl_uri_buf);
         if (hl.count > 0) {
             applyHyperlinks(env, &hl_spans, hl.count, &hl_uri_buf);
         }
+    }
 
-        // Auto-detect plain-text URLs
+    // Auto-detect plain-text URLs
+    if (dirty != gt.DIRTY_FALSE) {
         _ = env.call0(emacs.sym.@"ghostel--detect-urls");
     }
 

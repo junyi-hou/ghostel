@@ -1397,18 +1397,26 @@ Only send the event if the terminal has enabled focus reporting (mode 1004)."
                    (process-live-p ghostel--process))
           (ghostel--focus-event ghostel--term focused))))))
 
+(defvar-local ghostel--pending-output nil
+  "Accumulated output chunks waiting to be fed to the terminal.
+When non-nil, a list of unibyte strings (in reverse order) that
+will be concatenated and passed to `ghostel--write-input' at the
+next redraw.  Batching writes reduces per-call overhead in the
+VT parser.")
+
 ;;; Process management
 
 (defun ghostel--filter (process output)
   "Process filter: feed PTY output to the terminal.
-PROCESS is the shell process, OUTPUT is the raw byte string."
+PROCESS is the shell process, OUTPUT is the raw byte string.
+Output is accumulated and fed to the terminal in a single batch
+when the redraw timer fires, reducing per-call VT parser overhead."
   (when (buffer-live-p (process-buffer process))
     (with-current-buffer (process-buffer process)
       (when ghostel--term
-        ;; Pass raw bytes directly — CRLF normalization is done
-        ;; in the Zig module to avoid unibyte→multibyte corruption.
-        (ghostel--write-input ghostel--term output)
-        ;; Schedule redraw
+        ;; Accumulate output for batched write-input at redraw time.
+        (push output ghostel--pending-output)
+        ;; Schedule redraw (which will flush pending output first).
         (ghostel--invalidate)))))
 
 (defun ghostel--sentinel (process event)
@@ -1417,6 +1425,9 @@ PROCESS is the shell process, EVENT describes the state change."
   (let ((buf (process-buffer process)))
     (when (buffer-live-p buf)
       (with-current-buffer buf
+        ;; Flush any pending output before cleanup.
+        (when ghostel--term
+          (ghostel--flush-pending-output))
         (when ghostel--redraw-timer
           (cancel-timer ghostel--redraw-timer)
           (setq ghostel--redraw-timer nil))
@@ -1556,12 +1567,21 @@ frame after idle to improve interactive responsiveness."
                             #'ghostel--delayed-redraw
                             (current-buffer))))))
 
+(defun ghostel--flush-pending-output ()
+  "Feed any accumulated output to the terminal in a single batch."
+  (when ghostel--pending-output
+    (let ((combined (apply #'concat (nreverse ghostel--pending-output))))
+      (setq ghostel--pending-output nil)
+      (ghostel--write-input ghostel--term combined))))
+
 (defun ghostel--delayed-redraw (buffer)
   "Perform the actual redraw in BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq ghostel--redraw-timer nil)
       (when (and ghostel--term (not ghostel--copy-mode-active))
+        ;; Flush accumulated output before rendering.
+        (ghostel--flush-pending-output)
         ;; Skip during synchronized output unless forced by scroll/resize.
         (unless (and (not ghostel--force-next-redraw)
                      (ghostel--mode-enabled ghostel--term 2026))

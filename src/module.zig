@@ -133,27 +133,51 @@ fn fnWriteInput(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*
     // without \r.  Insert \r before every bare \n.
     // Done here in Zig to avoid Elisp unibyte→multibyte corruption.
     const raw = data.?;
-    var norm_buf: [131072]u8 = undefined;
-    var npos: usize = 0;
+
+    // Count bare \n to determine output size.
+    var extra_cr: usize = 0;
     for (0..raw.len) |i| {
         if (raw[i] == '\n' and (i == 0 or raw[i - 1] != '\r')) {
-            if (npos < norm_buf.len) {
+            extra_cr += 1;
+        }
+    }
+
+    if (extra_cr == 0) {
+        // No normalization needed — feed raw data directly.
+        term.vtWrite(raw);
+    } else {
+        // Need to insert \r before bare \n.
+        const out_len = raw.len + extra_cr;
+        var norm_stack: [131072]u8 = undefined;
+        var norm_heap: ?[]u8 = null;
+        defer if (norm_heap) |nh| std.heap.c_allocator.free(nh);
+
+        const norm_buf: []u8 = if (out_len <= norm_stack.len)
+            &norm_stack
+        else blk: {
+            norm_heap = std.heap.c_allocator.alloc(u8, out_len) catch {
+                // Fall back to stack buffer, truncating if needed.
+                break :blk &norm_stack;
+            };
+            break :blk norm_heap.?;
+        };
+
+        var npos: usize = 0;
+        for (0..raw.len) |i| {
+            if (raw[i] == '\n' and (i == 0 or raw[i - 1] != '\r')) {
                 norm_buf[npos] = '\r';
                 npos += 1;
             }
-        }
-        if (npos < norm_buf.len) {
             norm_buf[npos] = raw[i];
             npos += 1;
         }
+        term.vtWrite(norm_buf[0..npos]);
     }
-    const normalized = norm_buf[0..npos];
-    term.vtWrite(normalized);
 
     // Scan for OSC sequences that libghostty-vt discards.
-    extractAndSetPwd(term, normalized);
-    extractOsc52(env, normalized);
-    extractOsc133(env, normalized);
+    extractAndSetPwd(term, raw);
+    extractOsc52(env, raw);
+    extractOsc133(env, raw);
 
     return env.nil();
 }

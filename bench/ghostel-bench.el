@@ -225,8 +225,10 @@ When NO-DETECT is non-nil, disable URL and file detection."
            (ghostel-enable-file-detection (not no-detect))
            (inhibit-read-only t)
            (redraw-timer nil)
+           (pending nil)
            (done nil)
-           ;; Wire up the same filter/timer loop as real ghostel-mode
+           ;; Wire up the same filter/timer loop as real ghostel-mode,
+           ;; batching writes to reduce per-call VT parser overhead.
            (proc (make-process
                   :name "ghostel-bench"
                   :buffer (current-buffer)
@@ -235,7 +237,7 @@ When NO-DETECT is non-nil, disable URL and file detection."
                   :coding 'binary
                   :noquery t
                   :filter (lambda (_proc output)
-                            (ghostel--write-input term output)
+                            (push output pending)
                             (unless redraw-timer
                               (setq redraw-timer
                                     (run-with-timer
@@ -243,6 +245,11 @@ When NO-DETECT is non-nil, disable URL and file detection."
                                      (lambda ()
                                        (setq redraw-timer nil)
                                        (let ((inhibit-read-only t))
+                                         (when pending
+                                           (ghostel--write-input
+                                            term
+                                            (apply #'concat (nreverse pending)))
+                                           (setq pending nil))
                                          (ghostel--redraw term full-redraw)))))))
                   :sentinel (lambda (_proc _event)
                               (setq done t)))))
@@ -250,8 +257,11 @@ When NO-DETECT is non-nil, disable URL and file detection."
       ;; Run Emacs event loop until process exits
       (while (not done)
         (accept-process-output proc 30))
-      ;; Flush any pending redraw
+      ;; Flush any pending output and redraw
       (when redraw-timer (cancel-timer redraw-timer))
+      (when pending
+        (ghostel--write-input term (apply #'concat (nreverse pending)))
+        (setq pending nil))
       (ghostel--redraw term full-redraw))))
 
 (defun ghostel-bench--pty-vterm (data-file)
@@ -570,16 +580,21 @@ content — relevant for apps like htop, vim, claude-code."
 ROWS and COLS specify terminal size.  ITERS is iteration count.
 When RENDER-P is non-nil, also call redraw after write-input."
   (let ((label (format "%dx%d" rows cols)))
+    ;; When rendering, prefix each iteration with a unique line so that
+    ;; dirty tracking cannot optimize away the redraw.
     ;; ghostel incremental
     (with-temp-buffer
       (let ((data (ghostel-bench--encode-for-backend raw-data 'ghostel))
             (term (ghostel-bench--make-ghostel rows cols))
-            (inhibit-read-only t))
+            (inhibit-read-only t)
+            (counter 0))
         (ghostel-bench--measure
          (format "%s/ghostel-incr/%s" name label)
          (string-bytes data) iters
          (if render-p
              (lambda ()
+               (setq counter (1+ counter))
+               (ghostel--write-input term (format "\e[H%d\r\n" counter))
                (ghostel--write-input term data)
                (ghostel--redraw term nil))
            (lambda () (ghostel--write-input term data))))))
@@ -588,23 +603,29 @@ When RENDER-P is non-nil, also call redraw after write-input."
       (with-temp-buffer
         (let ((data (ghostel-bench--encode-for-backend raw-data 'ghostel))
               (term (ghostel-bench--make-ghostel rows cols))
-              (inhibit-read-only t))
+              (inhibit-read-only t)
+              (counter 0))
           (ghostel-bench--measure
            (format "%s/ghostel-full/%s" name label)
            (string-bytes data) iters
            (lambda ()
+             (setq counter (1+ counter))
+             (ghostel--write-input term (format "\e[H%d\r\n" counter))
              (ghostel--write-input term data)
              (ghostel--redraw term t))))))
     ;; vterm
     (when ghostel-bench-include-vterm
       (with-temp-buffer
         (let ((data (ghostel-bench--encode-for-backend raw-data 'vterm))
-              (term (ghostel-bench--make-vterm rows cols)))
+              (term (ghostel-bench--make-vterm rows cols))
+              (counter 0))
           (ghostel-bench--measure
            (format "%s/vterm/%s" name label)
            (string-bytes data) iters
            (if render-p
                (lambda ()
+                 (setq counter (1+ counter))
+                 (vterm--write-input term (format "\e[H%d\r\n" counter))
                  (vterm--write-input term data)
                  (vterm--redraw term))
              (lambda () (vterm--write-input term data)))))))
@@ -613,12 +634,17 @@ When RENDER-P is non-nil, also call redraw after write-input."
       (with-temp-buffer
         (let ((data (ghostel-bench--encode-for-backend raw-data 'eat))
               (term (ghostel-bench--make-eat rows cols))
-              (inhibit-read-only t))
+              (inhibit-read-only t)
+              (counter 0))
           (ghostel-bench--measure
            (format "%s/eat/%s" name label)
            (string-bytes data) iters
            (if render-p
                (lambda ()
+                 (setq counter (1+ counter))
+                 (eat-term-process-output
+                  term (decode-coding-string
+                        (format "\e[H%d\r\n" counter) 'utf-8))
                  (eat-term-process-output term data)
                  (eat-term-redisplay term))
              (lambda () (eat-term-process-output term data))))
