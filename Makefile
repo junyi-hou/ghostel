@@ -3,7 +3,7 @@ EMACS ?= emacs
 XDG_CACHE_HOME ?= $(HOME)/.cache
 MELPAZOID_DIR  ?= $(XDG_CACHE_HOME)/melpazoid
 
-.PHONY: all build check test lint melpazoid byte-compile clean
+.PHONY: all build check test lint melpazoid byte-compile bench bench-quick clean
 
 all: build test lint
 
@@ -28,6 +28,12 @@ melpazoid:
 
 byte-compile:
 	$(EMACS) --batch -Q -L . -f batch-byte-compile ghostel.el ghostel-debug.el
+
+bench:
+	bash bench/run-bench.sh
+
+bench-quick:
+	bash bench/run-bench.sh --quick
 
 clean:
 	rm -f ghostel-module.dylib ghostel-module.so
