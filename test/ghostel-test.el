@@ -868,6 +868,40 @@
       (kill-buffer buf))))
 
 ;; -----------------------------------------------------------------------
+;; Test: copy-mode hl-line-mode management
+;; -----------------------------------------------------------------------
+
+(ert-deftest ghostel-test-copy-mode-hl-line ()
+  "Test that global-hl-line-mode is suppressed and hl-line restored in copy-mode."
+  (let ((buf (generate-new-buffer " *ghostel-test-hl-line*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (ghostel-mode)
+          (require 'hl-line)
+          ;; Simulate global-hl-line-mode being active
+          (let ((global-hl-line-mode t))
+            (should global-hl-line-mode)
+            ;; Suppress should opt this buffer out
+            (ghostel--suppress-hl-line-mode)
+            (should ghostel--saved-hl-line-mode)
+            ;; Buffer-local global-hl-line-mode must be nil — this is the
+            ;; mechanism that prevents global-hl-line-highlight (on
+            ;; post-command-hook) from creating overlays in this buffer.
+            (should-not global-hl-line-mode))
+          ;; Enter copy mode — local hl-line-mode should be enabled
+          (let ((ghostel--copy-mode-active nil)
+                (ghostel--redraw-timer nil))
+            (ghostel-copy-mode)
+            (should (bound-and-true-p hl-line-mode))
+            ;; Exit copy mode — local hl-line-mode disabled again
+            (ghostel-copy-mode-exit)
+            (should-not (bound-and-true-p hl-line-mode))))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (kill-local-variable 'global-hl-line-mode))
+        (kill-buffer buf)))))
+
+;; -----------------------------------------------------------------------
 ;; Runner
 ;; -----------------------------------------------------------------------
 
@@ -882,7 +916,8 @@
     ghostel-test-sync-theme
     ghostel-test-osc51-eval
     ghostel-test-osc51-eval-unknown
-    ghostel-test-copy-mode-cursor)
+    ghostel-test-copy-mode-cursor
+    ghostel-test-copy-mode-hl-line)
   "Tests that require only Elisp (no native module).")
 
 (defun ghostel-test-run-elisp ()

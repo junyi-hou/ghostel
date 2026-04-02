@@ -1051,6 +1051,10 @@ Set mark, navigate to select, then \\[ghostel-copy-mode-copy] to copy.")
 (defvar-local ghostel--saved-cursor-type nil
   "Saved `cursor-type' before entering copy mode.")
 
+(defvar-local ghostel--saved-hl-line-mode nil
+  "Non-nil if line highlighting was active when `ghostel-mode' suppressed it.
+Covers both `global-hl-line-mode' and buffer-local `hl-line-mode'.")
+
 (defun ghostel-copy-mode ()
   "Enter copy mode for selecting and copying terminal text.
 The display is frozen and standard Emacs navigation keys work.
@@ -1070,6 +1074,8 @@ Press \\`q' or \\[ghostel-copy-mode-exit] to exit without copying."
     ;; Switch to copy mode keymap (standard Emacs keys work by default)
     (setq ghostel--saved-local-map (current-local-map))
     (use-local-map ghostel-copy-mode-map)
+    (when ghostel--saved-hl-line-mode
+      (hl-line-mode 1))
     (setq buffer-read-only t)
     (setq mode-name "Ghostel:Copy")
     (force-mode-line-update)
@@ -1083,6 +1089,8 @@ Press \\`q' or \\[ghostel-copy-mode-exit] to exit without copying."
     (setq cursor-type ghostel--saved-cursor-type)
     (deactivate-mark)
     (use-local-map ghostel--saved-local-map)
+    (when ghostel--saved-hl-line-mode
+      (hl-line-mode -1))
     (setq buffer-read-only nil)
     (setq mode-name "Ghostel")
     (force-mode-line-update)
@@ -1727,6 +1735,24 @@ PROCESS is the shell, HEIGHT and WIDTH the final dimensions."
   (setq-local window-adjust-process-window-size-function
               #'ghostel--window-adjust-process-window-size)
   (add-function :after after-focus-change-function #'ghostel--focus-change))
+
+(defun ghostel--suppress-hl-line-mode ()
+  "Disable hl-line highlighting to prevent redraw flicker.
+Handles both `global-hl-line-mode' (which manages its own overlay via
+`post-command-hook', independent of the buffer-local `hl-line-mode')
+and buffer-local `hl-line-mode'."
+  ;; global-hl-line-mode: opt this buffer out by setting the variable
+  ;; buffer-locally to nil (as documented in the hl-line.el commentary).
+  (when (bound-and-true-p global-hl-line-mode)
+    (setq ghostel--saved-hl-line-mode t)
+    (setq-local global-hl-line-mode nil)
+    (global-hl-line-unhighlight))
+  ;; Buffer-local hl-line-mode
+  (when (bound-and-true-p hl-line-mode)
+    (setq ghostel--saved-hl-line-mode t)
+    (hl-line-mode -1)))
+
+(add-hook 'ghostel-mode-hook #'ghostel--suppress-hl-line-mode)
 
 
 ;;; Entry point
