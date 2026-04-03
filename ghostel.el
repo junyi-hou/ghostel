@@ -548,6 +548,9 @@ DIR is the module directory."
 (defvar-local ghostel--resize-timer nil
   "Timer for debounced SIGWINCH on alt screen.")
 
+(defvar-local ghostel--height-adjustment 0
+  "Rows subtracted from window-body-height to fit tall lines (emoji).")
+
 
 (defvar-local ghostel--last-directory nil
   "Last known working directory from OSC 7, used for dedup.")
@@ -1716,10 +1719,26 @@ frame after idle to improve interactive responsiveness."
             (ghostel--pin-window-start)))))))
 
 (defun ghostel--pin-window-start ()
-  "Pin the window so terminal row 1 stays at the top."
+  "Pin the window so terminal row 1 stays at the top.
+When tall glyphs (emoji) cause content to overflow the window,
+shrink the terminal by one row and re-render."
   (let ((win (get-buffer-window)))
     (when win
-      (set-window-start win (point-min)))))
+      (set-window-start win (point-min))
+      (when (and ghostel--term
+                 (> (point-max) (point-min))
+                 (not (pos-visible-in-window-p (1- (point-max)) win)))
+        ;; Content overflows — reduce terminal by one row.
+        (cl-incf ghostel--height-adjustment)
+        (let* ((height (- (window-body-height win)
+                          ghostel--height-adjustment))
+               (width (window-max-chars-per-line win)))
+          (when (> height 0)
+            (ghostel--set-size ghostel--term height width)
+            (when (and ghostel--process (process-live-p ghostel--process))
+              (set-process-window-size ghostel--process height width))
+            (ghostel--redraw ghostel--term ghostel-full-redraw)
+            (set-window-start win (point-min))))))))
 
 (defun ghostel-force-redraw ()
   "Force a full terminal redraw (for debugging)."
@@ -1738,6 +1757,7 @@ PROCESS is the shell process, WINDOWS is the list of windows."
   (let* ((window (car windows))
          (width (window-max-chars-per-line window))
          (height (window-body-height window)))
+    (setq ghostel--height-adjustment 0)
     (when ghostel--term
       (if (ghostel--mode-enabled ghostel--term 1049)
           ;; Alt screen: debounce the entire resize (terminal + SIGWINCH)
