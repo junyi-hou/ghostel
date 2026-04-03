@@ -23,7 +23,7 @@ package-lint:
 		--eval "(package-initialize)" \
 		--eval "(require 'package-lint)" \
 		-f package-lint-batch-and-exit \
-		ghostel.el ghostel-debug.el
+		ghostel.el
 
 checkdoc:
 	$(EMACS) --batch -Q \
