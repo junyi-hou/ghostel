@@ -522,10 +522,9 @@ DIR is the module directory."
            (display-warning 'ghostel
                             (format "Failed to load native module: %s\nTry M-x ghostel-module-compile to rebuild"
                                     (error-message-string err)))))
-      (unless ghostel-module-auto-install
-        (display-warning 'ghostel
-                         (concat "Native module not found: " mod
-                                 "\nRun M-x ghostel-download-module or M-x ghostel-module-compile"))))))
+      (display-warning 'ghostel
+                       (concat "Native module not found: " mod
+                               "\nRun M-x ghostel-download-module or M-x ghostel-module-compile")))))
 
 
 ;;; Internal variables
@@ -1847,6 +1846,14 @@ and buffer-local `hl-line-mode'."
 (defun ghostel ()
   "Create a new Ghostel terminal buffer."
   (interactive)
+  (unless (fboundp 'ghostel--new)
+    (let ((dir (file-name-directory (locate-library "ghostel"))))
+      (ghostel--ensure-module dir)
+      (let ((mod (expand-file-name
+                  (concat "ghostel-module" module-file-suffix) dir)))
+        (if (file-exists-p mod)
+            (module-load mod)
+          (user-error "Ghostel native module not available")))))
   (let* ((index (cl-incf ghostel--buffer-counter))
          (buf-name (if (= index 1)
                        ghostel-buffer-name
