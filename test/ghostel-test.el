@@ -924,6 +924,36 @@ cell, so the visual line width must equal the terminal column count."
           (kill-buffer other))))))
 
 ;; -----------------------------------------------------------------------
+;; Test: apply-palette sets default fg/bg from Emacs default face
+;; -----------------------------------------------------------------------
+
+(ert-deftest ghostel-test-apply-palette-default-colors ()
+  "Test that ghostel--apply-palette sets default fg/bg from the Emacs default face."
+  (let ((default-colors-calls nil)
+        (palette-calls nil))
+    (cl-letf (((symbol-function 'ghostel--set-default-colors)
+               (lambda (term fg bg)
+                 (push (list term fg bg) default-colors-calls)))
+              ((symbol-function 'ghostel--set-palette)
+               (lambda (term colors) (push (list term colors) palette-calls))))
+      ;; With a fake terminal, apply-palette should call set-default-colors
+      (ghostel--apply-palette 'fake-term)
+      (should (= 1 (length default-colors-calls)))
+      (should (eq 'fake-term (car (car default-colors-calls))))
+      ;; fg and bg should be hex color strings from the default face
+      (let ((fg (nth 1 (car default-colors-calls)))
+            (bg (nth 2 (car default-colors-calls))))
+        (should (string-prefix-p "#" fg))
+        (should (string-prefix-p "#" bg)))
+      ;; Palette should also be set
+      (should (= 1 (length palette-calls)))
+      ;; With nil term, nothing should be called
+      (setq default-colors-calls nil palette-calls nil)
+      (ghostel--apply-palette nil)
+      (should-not default-colors-calls)
+      (should-not palette-calls))))
+
+;; -----------------------------------------------------------------------
 ;; OSC 51 elisp eval
 ;; -----------------------------------------------------------------------
 
@@ -1066,6 +1096,7 @@ cell, so the visual line width must equal the terminal column count."
     ghostel-test-filter-soft-wraps
     ghostel-test-prompt-navigation
     ghostel-test-sync-theme
+    ghostel-test-apply-palette-default-colors
     ghostel-test-osc51-eval
     ghostel-test-osc51-eval-unknown
     ghostel-test-copy-mode-cursor

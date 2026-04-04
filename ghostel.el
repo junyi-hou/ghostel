@@ -312,6 +312,7 @@ Bump this only when the Elisp code requires a newer native module
 (declare-function ghostel--scroll "ghostel-module")
 (declare-function ghostel--scroll-bottom "ghostel-module")
 (declare-function ghostel--scroll-top "ghostel-module")
+(declare-function ghostel--set-default-colors "ghostel-module")
 (declare-function ghostel--set-palette "ghostel-module")
 (declare-function ghostel--set-size "ghostel-module")
 (declare-function ghostel--write-input "ghostel-module")
@@ -1502,15 +1503,20 @@ Falls back to \"#000000\" if the color cannot be resolved."
       "#000000"))
 
 (defun ghostel--apply-palette (term)
-  "Apply colors from `ghostel-color-palette' faces to TERM."
-  (when (and term ghostel-color-palette)
-    (let ((colors
-           (mapconcat
-            (lambda (face)
-              (ghostel--face-hex-color face :foreground))
-            ghostel-color-palette
-            "")))
-      (ghostel--set-palette term colors))))
+  "Apply colors from `ghostel-color-palette' faces and default fg/bg to TERM."
+  (when term
+    (ghostel--set-default-colors
+     term
+     (ghostel--face-hex-color 'default :foreground)
+     (ghostel--face-hex-color 'default :background))
+    (when ghostel-color-palette
+      (let ((colors
+             (mapconcat
+              (lambda (face)
+                (ghostel--face-hex-color face :foreground))
+              ghostel-color-palette
+              "")))
+        (ghostel--set-palette term colors)))))
 
 
 ;;; Theme synchronization

@@ -42,6 +42,7 @@ export fn emacs_module_init(runtime: *c.struct_emacs_runtime) callconv(.c) c_int
     env.bindFunction("ghostel--mouse-event", 6, 6, &fnMouseEvent, "Send a mouse event to the terminal.\n\n(ghostel--mouse-event TERM ACTION BUTTON ROW COL MODS)");
     env.bindFunction("ghostel--focus-event", 2, 2, &fnFocusEvent, "Send a focus event to the terminal.\n\n(ghostel--focus-event TERM GAINED)");
     env.bindFunction("ghostel--set-palette", 2, 2, &fnSetPalette, "Set the ANSI color palette.\n\n(ghostel--set-palette TERM COLORS-STRING)");
+    env.bindFunction("ghostel--set-default-colors", 3, 3, &fnSetDefaultColors, "Set default foreground and background colors.\n\n(ghostel--set-default-colors TERM FG-HEX BG-HEX)");
     env.bindFunction("ghostel--mode-enabled", 2, 2, &fnModeEnabled, "Return t if terminal DEC private MODE is enabled.\n\n(ghostel--mode-enabled TERM MODE)");
     env.bindFunction("ghostel--debug-state", 1, 1, &fnDebugState, "Return debug info about terminal/render state.\n\n(ghostel--debug-state TERM)");
     env.bindFunction("ghostel--debug-feed", 2, 2, &fnDebugFeed, "Feed STR to terminal and return first row + cursor.\n\n(ghostel--debug-feed TERM STR)");
@@ -557,6 +558,55 @@ fn hexDigit(ch: u8) ?u8 {
     if (ch >= 'a' and ch <= 'f') return ch - 'a' + 10;
     if (ch >= 'A' and ch <= 'F') return ch - 'A' + 10;
     return null;
+}
+
+/// Parse a "#RRGGBB" hex color string into a ColorRgb.
+fn parseHexColor(s: []const u8) ?gt.ColorRgb {
+    if (s.len < 7 or s[0] != '#') return null;
+    const r = parseHexByte(s[1], s[2]) orelse return null;
+    const g = parseHexByte(s[3], s[4]) orelse return null;
+    const b = parseHexByte(s[5], s[6]) orelse return null;
+    return .{ .r = r, .g = g, .b = b };
+}
+
+/// (ghostel--set-default-colors TERM FG-HEX BG-HEX)
+/// Set the terminal's default foreground and background colors from "#RRGGBB" strings.
+fn fnSetDefaultColors(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*anyopaque) callconv(.c) c.emacs_value {
+    const env = emacs.Env.init(raw_env.?);
+    const term = env.getUserPtr(Terminal, args[0]) orelse {
+        env.signalError("ghostel: invalid terminal handle");
+        return env.nil();
+    };
+
+    var fg_buf: [16]u8 = undefined;
+    var bg_buf: [16]u8 = undefined;
+    const fg_str = env.extractString(args[1], &fg_buf) orelse {
+        env.signalError("ghostel: invalid foreground color");
+        return env.nil();
+    };
+    const bg_str = env.extractString(args[2], &bg_buf) orelse {
+        env.signalError("ghostel: invalid background color");
+        return env.nil();
+    };
+
+    const fg = parseHexColor(fg_str) orelse {
+        env.signalError("ghostel: cannot parse foreground color");
+        return env.nil();
+    };
+    const bg = parseHexColor(bg_str) orelse {
+        env.signalError("ghostel: cannot parse background color");
+        return env.nil();
+    };
+
+    term.setColorForeground(&fg) catch {
+        env.signalError("ghostel: failed to set foreground color");
+        return env.nil();
+    };
+    term.setColorBackground(&bg) catch {
+        env.signalError("ghostel: failed to set background color");
+        return env.nil();
+    };
+    return env.t();
 }
 
 /// (ghostel--debug-state TERM)
