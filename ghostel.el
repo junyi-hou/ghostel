@@ -1974,6 +1974,16 @@ wheel events reach ghostel's own scroll commands."
       (ghostel--start-process))
     (switch-to-buffer buffer)))
 
+;;;###autoload
+(defun ghostel-project ()
+  "Create a new Ghostel terminal in the current project's root.
+The buffer name is prefixed with the project name."
+  (interactive)
+  (let ((default-directory (project-root (project-current t)))
+	(ghostel-buffer-name (project-prefixed-buffer-name
+			      (string-replace "*" "" ghostel-buffer-name))))
+    (ghostel)))
+
 (defun ghostel-other ()
   "Switch to the next ghostel terminal buffer, or create one."
   (interactive)
