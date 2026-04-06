@@ -317,6 +317,35 @@ cell, so the visual line width must equal the terminal column count."
     (ghostel--write-input term "\e]2;My Title\e\\")
     (should (equal "My Title" (ghostel--get-title term))))) ; title set via OSC 2
 
+(ert-deftest ghostel-test-title-does-not-overwrite-manual-rename ()
+  "Test that title updates do not overwrite a manual buffer rename."
+  (let (buf)
+    (unwind-protect
+        (cl-letf (((symbol-function 'ghostel--new)
+                   (lambda (&rest _args) 'fake-term))
+                  ((symbol-function 'ghostel--apply-palette)
+                   (lambda (&rest _args) nil))
+                  ((symbol-function 'ghostel--start-process)
+                   (lambda () nil)))
+          (let ((ghostel--buffer-counter 0))
+            (ghostel)
+            (setq buf (current-buffer)))
+          (with-current-buffer buf
+            (should (equal "*ghostel*" (buffer-name)))
+            (should (equal "*ghostel*" ghostel--managed-buffer-name))
+            (ghostel--set-title "Title A")
+            (should (equal "*ghostel: Title A*" (buffer-name)))
+            (should (equal "*ghostel: Title A*" ghostel--managed-buffer-name))
+            (ghostel--set-title "Title A2")
+            (should (equal "*ghostel: Title A2*" (buffer-name)))
+            (should (equal "*ghostel: Title A2*" ghostel--managed-buffer-name))
+            (rename-buffer "ghostel manual title test" t)
+            (ghostel--set-title "Title B")
+            (should (equal "ghostel manual title test" (buffer-name)))
+            (should (equal "*ghostel: Title A2*" ghostel--managed-buffer-name))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
 ;; -----------------------------------------------------------------------
 ;; Test: CRLF normalization in Zig
 ;; -----------------------------------------------------------------------
@@ -1511,6 +1540,7 @@ cell, so the visual line width must equal the terminal column count."
     ghostel-test-module-version-match
     ghostel-test-module-version-mismatch
     ghostel-test-module-version-newer-than-minimum
+    ghostel-test-title-does-not-overwrite-manual-rename
     ghostel-test-immediate-redraw-triggers-on-small-echo
     ghostel-test-immediate-redraw-skips-large-output
     ghostel-test-immediate-redraw-skips-stale-send
