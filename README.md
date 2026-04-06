@@ -166,6 +166,7 @@ test "$INSIDE_EMACS" = 'ghostel'; and source "$EMACS_GHOSTEL_PATH/etc/ghostel.fi
 | `C-c C-d`   | Send EOF (C-d)                         |
 | `C-c C-\`   | Send quit (C-\)                        |
 | `C-c C-t`   | Enter copy mode                        |
+| `C-c M-w`   | Copy entire scrollback to kill ring    |
 | `C-y`       | Yank from kill ring (bracketed paste)  |
 | `M-y`       | Yank-pop (cycle through kill ring)     |
 | `C-c C-y`   | Paste from kill ring                   |
@@ -183,20 +184,25 @@ Keys listed in `ghostel-keymap-exceptions` (default: `C-c`, `C-x`, `C-u`,
 Enter with `C-c C-t`. Standard Emacs navigation works.
 Normal letter keys exit copy mode and send the key to the terminal.
 
-| Key           | Action                          |
-|---------------|---------------------------------|
-| `C-SPC`       | Set mark                        |
-| `M-w` / `C-w` | Copy selection and exit         |
-| `C-n` / `C-p` | Move line (scrolls at edges)    |
-| `M-v` / `C-v` | Scroll page up / down           |
-| `M-<` / `M->` | Jump to top / bottom of buffer  |
-| `C-c C-n`     | Jump to next prompt             |
-| `C-c C-p`     | Jump to previous prompt         |
-| `C-l`         | Recenter viewport               |
-| `C-c C-t`     | Exit without copying            |
-| `a`–`z`       | Exit and send key to terminal   |
+| Key           | Action                           |
+|---------------|----------------------------------|
+| `C-SPC`       | Set mark                         |
+| `M-w` / `C-w` | Copy selection and exit          |
+| `C-n` / `C-p` | Move line (scrolls at edges)     |
+| `M-v` / `C-v` | Scroll page up / down            |
+| `M-<` / `M->` | Jump to top / bottom of buffer   |
+| `C-c C-n`     | Jump to next prompt              |
+| `C-c C-p`     | Jump to previous prompt          |
+| `C-l`         | Recenter viewport                |
+| `C-c C-a`     | Load full scrollback into buffer |
+| `C-c C-t`     | Exit without copying             |
+| `a`–`z`       | Exit and send key to terminal    |
 
 Soft-wrapped newlines are automatically stripped from copied text.
+
+After `C-c C-a`, the entire scrollback history is loaded into the buffer
+as styled text. Standard Emacs commands work across the full content:
+`C-x h` to select all, `C-s` to search, mark/region spanning any distance.
 
 ## Features
 
@@ -329,6 +335,7 @@ individual faces with `M-x customize-face`.
 | `M-x ghostel-clear`            | Clear screen and scrollback                  |
 | `M-x ghostel-clear-scrollback` | Clear scrollback only                        |
 | `M-x ghostel-copy-mode`        | Enter copy mode                              |
+| `M-x ghostel-copy-all`         | Copy entire scrollback to kill ring          |
 | `M-x ghostel-paste`            | Paste from kill ring                         |
 | `M-x ghostel-send-next-key`    | Send next key literally                      |
 | `M-x ghostel-next-prompt`      | Jump to next shell prompt                    |

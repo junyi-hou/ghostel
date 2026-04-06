@@ -211,6 +211,24 @@ pub fn isModeEnabled(self: *Self, mode: gt.c.GhosttyMode) bool {
     return enabled;
 }
 
+/// Get the total number of rows (scrollback + active screen).
+pub fn getTotalRows(self: *Self) usize {
+    var total: usize = 0;
+    if (gt.c.ghostty_terminal_get(self.terminal, gt.DATA_TOTAL_ROWS, @ptrCast(&total)) != gt.SUCCESS) {
+        return self.rows;
+    }
+    return total;
+}
+
+/// Get the scrollbar state (total, offset, len).
+pub fn getScrollbar(self: *Self) ?gt.TerminalScrollbar {
+    var sb: gt.TerminalScrollbar = undefined;
+    if (gt.c.ghostty_terminal_get(self.terminal, gt.DATA_SCROLLBAR, @ptrCast(&sb)) != gt.SUCCESS) {
+        return null;
+    }
+    return sb;
+}
+
 /// Emacs finalizer — called when the user-ptr is garbage collected.
 pub fn emacsFinalize(ptr: ?*anyopaque) callconv(.c) void {
     if (ptr) |p| {

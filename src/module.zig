@@ -47,6 +47,8 @@ export fn emacs_module_init(runtime: *c.struct_emacs_runtime) callconv(.c) c_int
     env.bindFunction("ghostel--cursor-position", 1, 1, &fnCursorPosition, "Return terminal cursor position as (COL . ROW), 0-indexed.\n\n(ghostel--cursor-position TERM)");
     env.bindFunction("ghostel--debug-state", 1, 1, &fnDebugState, "Return debug info about terminal/render state.\n\n(ghostel--debug-state TERM)");
     env.bindFunction("ghostel--debug-feed", 2, 2, &fnDebugFeed, "Feed STR to terminal and return first row + cursor.\n\n(ghostel--debug-feed TERM STR)");
+    env.bindFunction("ghostel--redraw-full-scrollback", 1, 1, &fnRedrawFullScrollback, "Render entire scrollback into buffer, return original viewport line.\n\n(ghostel--redraw-full-scrollback TERM)");
+    env.bindFunction("ghostel--copy-all-text", 1, 1, &fnCopyAllText, "Return entire scrollback as plain text string.\n\n(ghostel--copy-all-text TERM)");
     env.bindFunction("ghostel--module-version", 0, 0, &fnModuleVersion, "Return the native module version string.\n\n(ghostel--module-version)");
 
     emacs.initSymbols(env);
@@ -744,6 +746,48 @@ fn fnCursorPosition(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _
     _ = gt.c.ghostty_render_state_get(term.render_state, gt.RS_DATA_CURSOR_VIEWPORT_Y, @ptrCast(&cy));
 
     return env.call2(emacs.sym.cons, env.makeInteger(@as(i64, cx)), env.makeInteger(@as(i64, cy)));
+}
+
+/// (ghostel--redraw-full-scrollback TERM)
+/// Render the entire scrollback into the current buffer.
+/// Returns the 1-based line number of the original viewport position.
+fn fnRedrawFullScrollback(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*anyopaque) callconv(.c) c.emacs_value {
+    const env = emacs.Env.init(raw_env.?);
+    const term = env.getUserPtr(Terminal, args[0]) orelse return env.nil();
+    const line = render.redrawFullScrollback(env, term);
+    return env.makeInteger(line);
+}
+
+/// (ghostel--copy-all-text TERM)
+/// Return the entire scrollback as a plain text string using the formatter API.
+fn fnCopyAllText(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*anyopaque) callconv(.c) c.emacs_value {
+    const env = emacs.Env.init(raw_env.?);
+    const term = env.getUserPtr(Terminal, args[0]) orelse return env.nil();
+
+    var options: gt.FormatterTerminalOptions = std.mem.zeroes(gt.FormatterTerminalOptions);
+    options.size = @sizeOf(gt.FormatterTerminalOptions);
+    options.emit = gt.FORMATTER_PLAIN;
+    options.unwrap = true;
+    options.trim = true;
+    // extra and selection stay zeroed (null)
+
+    var formatter: gt.Formatter = undefined;
+    if (gt.c.ghostty_formatter_terminal_new(null, &formatter, term.terminal, options) != gt.SUCCESS) {
+        env.signalError("ghostel: failed to create formatter");
+        return env.nil();
+    }
+    defer gt.c.ghostty_formatter_free(formatter);
+
+    var ptr: [*c]u8 = undefined;
+    var len: usize = 0;
+    if (gt.c.ghostty_formatter_format_alloc(formatter, null, &ptr, &len) != gt.SUCCESS) {
+        env.signalError("ghostel: formatter failed");
+        return env.nil();
+    }
+
+    if (len == 0 or ptr == null) return env.nil();
+    defer gt.c.ghostty_free(null, ptr, len);
+    return env.makeString(ptr[0..len]);
 }
 
 /// (ghostel--module-version)

@@ -121,3 +121,16 @@ pub const SCROLL_DELTA: c_int = c.GHOSTTY_SCROLL_VIEWPORT_DELTA;
 
 // Point tag constants
 pub const POINT_TAG_VIEWPORT: c_int = c.GHOSTTY_POINT_TAG_VIEWPORT;
+
+// Scrollbar / total rows constants
+pub const DATA_TOTAL_ROWS = c.GHOSTTY_TERMINAL_DATA_TOTAL_ROWS;
+pub const DATA_SCROLLBACK_ROWS = c.GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS;
+pub const DATA_SCROLLBAR = c.GHOSTTY_TERMINAL_DATA_SCROLLBAR;
+pub const TerminalScrollbar = c.GhosttyTerminalScrollbar;
+
+// Formatter types
+pub const Formatter = c.GhosttyFormatter;
+pub const FormatterTerminalOptions = c.GhosttyFormatterTerminalOptions;
+pub const FormatterTerminalExtra = c.GhosttyFormatterTerminalExtra;
+pub const FormatterScreenExtra = c.GhosttyFormatterScreenExtra;
+pub const FORMATTER_PLAIN = c.GHOSTTY_FORMATTER_FORMAT_PLAIN;
