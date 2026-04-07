@@ -1932,7 +1932,6 @@ PROCESS is the shell, HEIGHT and WIDTH the final dimensions."
               (inhibit-modification-hooks t))
           (ghostel--redraw ghostel--term ghostel-full-redraw))))))
 
-
 
 ;;; Major mode
 
@@ -1948,7 +1947,8 @@ PROCESS is the shell, HEIGHT and WIDTH the final dimensions."
   (setq-local line-spacing 0)
   (setq-local window-adjust-process-window-size-function
               #'ghostel--window-adjust-process-window-size)
-  (add-function :after after-focus-change-function #'ghostel--focus-change))
+  (add-function :after after-focus-change-function #'ghostel--focus-change)
+  (ghostel--suppress-interfering-modes))
 
 (defun ghostel--suppress-interfering-modes ()
   "Disable global minor modes that interfere with ghostel.
@@ -1971,8 +1971,6 @@ wheel events reach ghostel's own scroll commands."
   ;; wheel-up/wheel-down reach ghostel-mode-map instead.
   (when (bound-and-true-p pixel-scroll-precision-mode)
     (setq-local pixel-scroll-precision-mode nil)))
-
-(add-hook 'ghostel-mode-hook #'ghostel--suppress-interfering-modes)
 
 
 ;;; Entry point
