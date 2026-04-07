@@ -192,6 +192,7 @@ Normal letter keys exit copy mode and send the key to the terminal.
 | `M-<` / `M->` | Jump to top / bottom of buffer  |
 | `C-c C-n`     | Jump to next prompt             |
 | `C-c C-p`     | Jump to previous prompt         |
+| `C-l`         | Recenter viewport               |
 | `C-c C-t`     | Exit without copying            |
 | `a`–`z`       | Exit and send key to terminal   |
 

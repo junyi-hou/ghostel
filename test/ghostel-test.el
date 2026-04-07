@@ -1579,6 +1579,73 @@ cell, so the visual line width must equal the terminal column count."
   ;; M-y should be bound to ghostel-yank-pop, not send-event
   (should (eq (lookup-key ghostel-mode-map (kbd "M-y")) #'ghostel-yank-pop)))
 
+;; -----------------------------------------------------------------------
+;; Test: ghostel-copy-mode-recenter
+;; -----------------------------------------------------------------------
+
+(ert-deftest ghostel-test-copy-mode-recenter ()
+  "Recenter scrolls terminal viewport to center the current line."
+  (let ((buf (generate-new-buffer " *ghostel-test-copy-mode-recenter*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (dotimes (i 20) (insert (format "line-%02d" i) (make-string 33 ?x) "\n"))
+          (setq ghostel--term 'fake-term)
+          (setq ghostel--copy-mode-active t)
+          (setq buffer-read-only t)
+          (let ((scroll-delta nil)
+                (redraw-called nil)
+                (recenter-called nil))
+            ;; Mock redraw that changes the first line (simulates viewport shift).
+            (cl-letf (((symbol-function 'ghostel--scroll)
+                       (lambda (_term delta) (setq scroll-delta delta)))
+                      ((symbol-function 'ghostel--redraw)
+                       (lambda (_term _full)
+                         (setq redraw-called t)
+                         (save-excursion
+                           (goto-char (point-min))
+                           (delete-char 1)
+                           (insert "!"))))
+                      ((symbol-function 'window-body-height)
+                       (lambda (&rest _) 20))
+                      ((symbol-function 'recenter)
+                       (lambda (&rest _) (setq recenter-called t))))
+              ;; Point on line 5 (above center 10) → scroll viewport up
+              (goto-char (point-min))
+              (forward-line 4)
+              (ghostel-copy-mode-recenter)
+              (should (equal -5 scroll-delta))
+              (should redraw-called)
+              (should recenter-called))
+
+            ;; Mock redraw that does NOT change buffer (simulates clamped scroll).
+            (cl-letf (((symbol-function 'ghostel--scroll)
+                       (lambda (_term delta) (setq scroll-delta delta)))
+                      ((symbol-function 'ghostel--redraw)
+                       (lambda (_term _full) (setq redraw-called t)))
+                      ((symbol-function 'window-body-height)
+                       (lambda (&rest _) 20))
+                      ((symbol-function 'recenter)
+                       (lambda (&rest _) (setq recenter-called t))))
+              ;; Point on line 15 (below center), scroll clamped → no-op
+              (setq scroll-delta nil redraw-called nil recenter-called nil)
+              (goto-char (point-min))
+              (forward-line 14)
+              (ghostel-copy-mode-recenter)
+              (should (equal 5 scroll-delta))
+              (should redraw-called)
+              (should-not recenter-called)
+              (should (= 15 (line-number-at-pos)))
+
+              ;; Point on line 10 (at center) → no scroll at all
+              (setq scroll-delta nil redraw-called nil recenter-called nil)
+              (goto-char (point-min))
+              (forward-line 9)
+              (ghostel-copy-mode-recenter)
+              (should-not scroll-delta)
+              (should-not redraw-called)
+              (should-not recenter-called))))
+      (kill-buffer buf))))
+
 (defconst ghostel-test--elisp-tests
   '(ghostel-test-raw-key-sequences
     ghostel-test-modifier-number
@@ -1613,7 +1680,8 @@ cell, so the visual line width must equal the terminal column count."
     ghostel-test-scroll-on-input-send-event
     ghostel-test-scroll-on-input-disabled
     ghostel-test-control-key-bindings
-    ghostel-test-meta-key-bindings)
+    ghostel-test-meta-key-bindings
+    ghostel-test-copy-mode-recenter)
   "Tests that require only Elisp (no native module).")
 
 (defun ghostel-test-run-elisp ()

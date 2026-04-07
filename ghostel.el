@@ -1094,6 +1094,37 @@ pasted using bracketed paste."
   (end-of-line)
   (skip-chars-backward " \t"))
 
+(defun ghostel-copy-mode-recenter ()
+  "Recenter the terminal viewport around the current line in copy mode.
+Scrolls the terminal viewport so the current line is vertically
+centered, then redraws.  When the scroll is clamped at a scrollback
+boundary (nothing to scroll into), does nothing."
+  (interactive)
+  (when ghostel--term
+    (let* ((current-line (line-number-at-pos))
+           (win-height (window-body-height))
+           (center (/ win-height 2))
+           (col (current-column)))
+      (unless (= current-line center)
+        ;; Hash the buffer to detect whether the scroll was clamped.
+        (let ((old-hash (buffer-hash)))
+          (ghostel--scroll ghostel--term (- current-line center))
+          (let ((inhibit-read-only t))
+            (ghostel--redraw ghostel--term ghostel-full-redraw))
+          ;; If the buffer changed the viewport actually moved —
+          ;; reposition point at center.  Otherwise the scroll was
+          ;; clamped; restore point since redraw moved it to the
+          ;; terminal cursor.
+          (if (equal old-hash (buffer-hash))
+              (progn
+                (goto-char (point-min))
+                (forward-line (1- current-line))
+                (move-to-column col))
+            (goto-char (point-min))
+            (forward-line (1- (min center (line-number-at-pos (point-max)))))
+            (move-to-column col)
+            (recenter)))))))
+
 
 ;;; Mouse input
 
@@ -1182,6 +1213,7 @@ pasted using bracketed paste."
     (define-key map (kbd "M-<")             #'ghostel-copy-mode-beginning-of-buffer)
     (define-key map (kbd "M->")             #'ghostel-copy-mode-end-of-buffer)
     (define-key map (kbd "C-e")             #'ghostel-copy-mode-end-of-line)
+    (define-key map (kbd "C-l")             #'ghostel-copy-mode-recenter)
     map)
   "Keymap for `ghostel-copy-mode'.
 Standard Emacs navigation works.
