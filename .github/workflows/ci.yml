@@ -50,6 +50,31 @@ jobs:
             -l test/ghostel-test.el \
             -f ghostel-test-run-elisp
 
+  test-evil:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs_version:
+          - '29.4'
+          - 'snapshot'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs_version }}
+
+      - name: Install evil
+        run: |
+          git clone --depth 1 https://github.com/emacs-evil/evil.git /tmp/evil
+
+      - name: Run ghostel-evil tests
+        run: |
+          emacs --batch -Q -L /tmp/evil -L . \
+            -l ert \
+            -l test/ghostel-evil-test.el \
+            -f ghostel-evil-test-run-elisp
+
   build-native:
     strategy:
       fail-fast: false

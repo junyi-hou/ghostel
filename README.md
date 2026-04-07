@@ -406,6 +406,35 @@ individual faces with `M-x customize-face`.
 | `ghostel-copy-mode-auto-load-scrollback` | `nil`        | Load full scrollback automatically when entering copy mode |
 | `ghostel-exit-functions`         | `nil`                | Hook run when the shell process exits                    |
 
+## Evil-mode
+
+Ghostel includes optional `evil-mode` support via `ghostel-evil.el`.
+It synchronizes the terminal cursor with Emacs point during evil state
+transitions so that normal-mode navigation (`hjkl` etc.) works
+correctly.
+
+To enable:
+
+```elisp
+(use-package ghostel-evil
+  :after (ghostel evil)
+  :hook (ghostel-mode . ghostel-evil-mode))
+```
+
+When `ghostel-evil-mode` is active:
+
+- Ghostel starts in **insert state** (terminal input works normally)
+- Pressing **ESC** enters normal state and snaps point to the terminal cursor
+- Normal-mode navigation (`h`, `j`, `k`, `l`, `w`, `b`, `e`, `0`, `$`, ...) works as expected
+- **Insert/append** (`i`, `a`, `I`, `A`) sync the terminal cursor to point before entering insert state
+- **Delete** (`d`, `dw`, `dd`, `D`, `x`, `X`) yanks text to the kill ring and deletes via the shell
+- **Change** (`c`, `cw`, `cc`, `C`, `s`, `S`) deletes then enters insert state
+- **Replace** (`r`) replaces the character under the cursor
+- **Paste** (`p`, `P`) pastes from the kill ring via bracketed paste
+- **Undo** (`u`) sends readline undo (`Ctrl+_`)
+- Cursor shape follows evil state (block for normal, bar for insert)
+- Alt-screen programs (vim, less, htop) are unaffected
+
 ## Commands
 
 | Command                        | Description                                  |

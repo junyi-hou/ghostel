@@ -2,12 +2,13 @@ EMACS ?= emacs
 
 XDG_CACHE_HOME ?= $(HOME)/.cache
 MELPAZOID_DIR  ?= $(XDG_CACHE_HOME)/melpazoid
+EVIL_DIR       ?= $(XDG_CACHE_HOME)/evil
 
 ELC := ghostel.elc ghostel-debug.elc
 
-.PHONY: all build check test test-all lint melpazoid byte-compile bench bench-quick clean
+.PHONY: all build check test test-all test-evil lint melpazoid byte-compile bench bench-quick clean
 
-all: build test-all lint
+all: build test-all test-evil lint
 
 build:
 	./build.sh
@@ -27,6 +28,13 @@ test: $(ELC)
 
 test-all: build $(ELC)
 	$(EMACS) --batch -Q -L . -l ert -l test/ghostel-test.el -f ghostel-test-run
+
+test-evil:
+	@if [ ! -d "$(EVIL_DIR)" ]; then \
+		git clone --depth 1 https://github.com/emacs-evil/evil.git "$(EVIL_DIR)"; \
+	fi
+	$(EMACS) --batch -Q -L "$(EVIL_DIR)" -L . \
+		-l ert -l test/ghostel-evil-test.el -f ghostel-evil-test-run
 
 byte-compile: $(ELC)
 
@@ -60,7 +68,7 @@ melpazoid:
 	@if [ ! -d "$(MELPAZOID_DIR)" ]; then \
 		git clone https://github.com/riscy/melpazoid.git "$(MELPAZOID_DIR)"; \
 	fi
-	RECIPE='(ghostel :fetcher github :repo "dakra/ghostel")' \
+	RECIPE='(ghostel :fetcher github :repo "dakra/ghostel" :files ("ghostel.el" "ghostel-debug.el" "ghostel-module.*"))' \
 		LOCAL_REPO=$(CURDIR) \
 		make -C "$(MELPAZOID_DIR)"
 
