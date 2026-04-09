@@ -1070,31 +1070,53 @@ pasted using bracketed paste."
     (when (and ghostel--process (process-live-p ghostel--process))
       (process-send-string ghostel--process "\f"))))
 
-(defun ghostel--scroll-up (&optional _event)
-  "Scroll the terminal viewport up (into scrollback)."
+(defun ghostel--forward-scroll-event (event button)
+  "Try to forward a scroll EVENT as mouse BUTTON to the terminal.
+Return non-nil if the event was forwarded (mouse tracking is active)."
+  (when (and event ghostel--term ghostel--process
+             (process-live-p ghostel--process)
+             (not ghostel--copy-mode-active))
+    (let* ((posn (event-start event))
+           (col-row (posn-col-row posn))
+           (col (car col-row))
+           (row (cdr col-row)))
+      (ghostel--mouse-event ghostel--term
+                            0  ; press
+                            button
+                            row col
+                            (ghostel--mouse-mods event)))))
+
+(defun ghostel--scroll-up (&optional event)
+  "Scroll the terminal viewport up (into scrollback).
+When the terminal has mouse tracking enabled, forward EVENT as a
+scroll event to the running application instead."
   (interactive "e")
   (if ghostel--copy-mode-full-buffer
       (scroll-down 3)
     (when ghostel--term
-      (ghostel--scroll ghostel--term -3)
-      (if ghostel--copy-mode-active
-          (let ((inhibit-read-only t))
-            (ghostel--redraw ghostel--term ghostel-full-redraw))
-        (setq ghostel--force-next-redraw t)
-        (ghostel--invalidate)))))
+      (unless (ghostel--forward-scroll-event event 4) ; button 4 = scroll up
+        (ghostel--scroll ghostel--term -3)
+        (if ghostel--copy-mode-active
+            (let ((inhibit-read-only t))
+              (ghostel--redraw ghostel--term ghostel-full-redraw))
+          (setq ghostel--force-next-redraw t)
+          (ghostel--invalidate))))))
 
-(defun ghostel--scroll-down (&optional _event)
-  "Scroll the terminal viewport down."
+(defun ghostel--scroll-down (&optional event)
+  "Scroll the terminal viewport down.
+When the terminal has mouse tracking enabled, forward EVENT as a
+scroll event to the running application instead."
   (interactive "e")
   (if ghostel--copy-mode-full-buffer
       (scroll-up 3)
     (when ghostel--term
-      (ghostel--scroll ghostel--term 3)
-      (if ghostel--copy-mode-active
-          (let ((inhibit-read-only t))
-            (ghostel--redraw ghostel--term ghostel-full-redraw))
-        (setq ghostel--force-next-redraw t)
-        (ghostel--invalidate)))))
+      (unless (ghostel--forward-scroll-event event 5) ; button 5 = scroll down
+        (ghostel--scroll ghostel--term 3)
+        (if ghostel--copy-mode-active
+            (let ((inhibit-read-only t))
+              (ghostel--redraw ghostel--term ghostel-full-redraw))
+          (setq ghostel--force-next-redraw t)
+          (ghostel--invalidate))))))
 
 (defun ghostel-copy-mode-scroll-up ()
   "Scroll the terminal viewport up by a page in copy mode."

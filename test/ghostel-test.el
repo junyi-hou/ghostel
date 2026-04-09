@@ -1648,6 +1648,72 @@ cell, so the visual line width must equal the terminal column count."
       (should-not scroll-bottom-called)
       (should-not ghostel--force-next-redraw))))
 
+(ert-deftest ghostel-test-scroll-forwards-mouse-tracking ()
+  "Scroll-up/down forward events when mouse tracking is active."
+  (let ((ghostel--term 'fake)
+        (ghostel--process 'fake)
+        (ghostel--copy-mode-active nil)
+        (ghostel--copy-mode-full-buffer nil)
+        (ghostel--force-next-redraw nil)
+        (mouse-event-args nil)
+        (scroll-called nil)
+        ;; Fake wheel-up event at row 5, col 10
+        (fake-event `(wheel-up (,(selected-window) 1 (10 . 5) 0))))
+    ;; Mouse tracking active: ghostel--mouse-event returns non-nil
+    (cl-letf (((symbol-function 'ghostel--mouse-event)
+               (lambda (_term action button row col mods)
+                 (setq mouse-event-args (list action button row col mods))
+                 t))
+              ((symbol-function 'ghostel--scroll)
+               (lambda (_term _delta) (setq scroll-called t)))
+              ((symbol-function 'process-live-p) (lambda (_p) t)))
+      (ghostel--scroll-up fake-event)
+      (should mouse-event-args)
+      (should (equal 0 (nth 0 mouse-event-args)))   ; action = press
+      (should (equal 4 (nth 1 mouse-event-args)))   ; button 4 = scroll up
+      (should (equal 5 (nth 2 mouse-event-args)))   ; row
+      (should (equal 10 (nth 3 mouse-event-args)))  ; col
+      (should-not scroll-called))
+    ;; Reset and test scroll-down with a wheel-down event
+    (setq mouse-event-args nil scroll-called nil)
+    (let ((fake-down-event `(wheel-down (,(selected-window) 1 (10 . 5) 0))))
+      (cl-letf (((symbol-function 'ghostel--mouse-event)
+                 (lambda (_term action button row col mods)
+                   (setq mouse-event-args (list action button row col mods))
+                   t))
+                ((symbol-function 'ghostel--scroll)
+                 (lambda (_term _delta) (setq scroll-called t)))
+                ((symbol-function 'process-live-p) (lambda (_p) t)))
+        (ghostel--scroll-down fake-down-event)
+        (should mouse-event-args)
+        (should (equal 5 (nth 1 mouse-event-args)))   ; button 5 = scroll down
+        (should-not scroll-called)))))
+
+(ert-deftest ghostel-test-scroll-fallback-no-mouse-tracking ()
+  "Scroll-up/down fall back to viewport scroll when mouse tracking is off."
+  (let ((ghostel--term 'fake)
+        (ghostel--process 'fake)
+        (ghostel--copy-mode-active nil)
+        (ghostel--copy-mode-full-buffer nil)
+        (ghostel--force-next-redraw nil)
+        (scroll-delta nil)
+        (fake-up-event `(wheel-up (,(selected-window) 1 (10 . 5) 0)))
+        (fake-down-event `(wheel-down (,(selected-window) 1 (10 . 5) 0))))
+    (cl-letf (((symbol-function 'ghostel--mouse-event)
+               (lambda (_term _action _button _row _col _mods) nil))
+              ((symbol-function 'ghostel--scroll)
+               (lambda (_term delta) (setq scroll-delta delta)))
+              ((symbol-function 'ghostel--invalidate) #'ignore)
+              ((symbol-function 'process-live-p) (lambda (_p) t)))
+      (ghostel--scroll-up fake-up-event)
+      (should (equal -3 scroll-delta))
+      (should ghostel--force-next-redraw)
+      ;; Reset and test scroll-down fallback
+      (setq scroll-delta nil ghostel--force-next-redraw nil)
+      (ghostel--scroll-down fake-down-event)
+      (should (equal 3 scroll-delta))
+      (should ghostel--force-next-redraw))))
+
 (ert-deftest ghostel-test-control-key-bindings ()
   "All non-exception C-<letter> keys should be bound in ghostel-mode-map."
   (dolist (c (number-sequence ?a ?z))
@@ -1868,6 +1934,8 @@ cell, so the visual line width must equal the terminal column count."
     ghostel-test-scroll-on-input-self-insert
     ghostel-test-scroll-on-input-send-event
     ghostel-test-scroll-on-input-disabled
+    ghostel-test-scroll-forwards-mouse-tracking
+    ghostel-test-scroll-fallback-no-mouse-tracking
     ghostel-test-control-key-bindings
     ghostel-test-meta-key-bindings
     ghostel-test-copy-mode-recenter
