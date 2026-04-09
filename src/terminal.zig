@@ -5,6 +5,7 @@
 const std = @import("std");
 const gt = @import("ghostty.zig");
 const emacs = @import("emacs.zig");
+const kitty_graphics = @import("kitty_graphics.zig");
 
 const Self = @This();
 
@@ -29,6 +30,13 @@ mouse_encoder: gt.c.GhosttyMouseEncoder,
 /// Terminal dimensions.
 cols: u16,
 rows: u16,
+
+/// Cell pixel dimensions (for image sizing).
+cell_width_px: u32 = 1,
+cell_height_px: u32 = 1,
+
+/// Kitty graphics image store.
+image_store: kitty_graphics.ImageStore = kitty_graphics.ImageStore.init(),
 
 /// Cached Emacs env pointer — only valid during a callback from Emacs.
 env: ?emacs.Env = null,
@@ -91,6 +99,7 @@ pub fn init(cols: u16, rows: u16, max_scrollback: usize) !Self {
 
 /// Free all ghostty resources.
 pub fn deinit(self: *Self) void {
+    self.image_store.deinit();
     gt.c.ghostty_mouse_encoder_free(self.mouse_encoder);
     gt.c.ghostty_key_encoder_free(self.key_encoder);
     gt.c.ghostty_render_state_row_cells_free(self.row_cells);
@@ -166,12 +175,41 @@ pub fn vtWrite(self: *Self, data: []const u8) void {
 }
 
 /// Resize the terminal.
-pub fn resize(self: *Self, cols: u16, rows: u16) !void {
-    if (gt.c.ghostty_terminal_resize(self.terminal, cols, rows, 1, 1) != gt.SUCCESS) {
+pub fn resize(self: *Self, cols: u16, rows: u16, cell_w: u32, cell_h: u32) !void {
+    if (gt.c.ghostty_terminal_resize(
+        self.terminal,
+        cols,
+        rows,
+        @intCast(cell_w),
+        @intCast(cell_h),
+    ) != gt.SUCCESS) {
         return error.ResizeFailed;
     }
     self.cols = cols;
     self.rows = rows;
+    self.cell_width_px = cell_w;
+    self.cell_height_px = cell_h;
+}
+
+/// Get the cursor column position (0-indexed).
+pub fn getCursorX(self: *Self) u16 {
+    var x: u16 = 0;
+    _ = gt.c.ghostty_terminal_get(self.terminal, gt.DATA_CURSOR_X, @ptrCast(&x));
+    return x;
+}
+
+/// Get the cursor row position (0-indexed, within active area).
+pub fn getCursorY(self: *Self) u16 {
+    var y: u16 = 0;
+    _ = gt.c.ghostty_terminal_get(self.terminal, gt.DATA_CURSOR_Y, @ptrCast(&y));
+    return y;
+}
+
+/// Get the number of scrollback rows.
+pub fn getScrollbackRows(self: *const Self) usize {
+    var n: usize = 0;
+    _ = gt.c.ghostty_terminal_get(self.terminal, gt.DATA_SCROLLBACK_ROWS, @ptrCast(&n));
+    return n;
 }
 
 /// Scroll the viewport.

@@ -240,6 +240,13 @@ pub const Env = struct {
         _ = self.call4(sym.@"put-text-property", start, end, prop, value);
     }
 
+    /// Create a unibyte string (for binary data like PNG images).
+    /// Returns null if the API is unavailable (Emacs < 28).
+    pub fn makeUnibyteString(self: Env, str: []const u8) ?Value {
+        const func = self.raw.make_unibyte_string orelse return null;
+        return func(self.raw, str.ptr, @intCast(str.len));
+    }
+
     /// Signal an error with a message string.
     pub fn signalError(self: Env, msg: []const u8) void {
         self.nonLocalExitSignal(
@@ -316,6 +323,11 @@ pub const Sym = struct {
     @"ghostel--osc133-marker": Value,
     @"ghostel--flush-output": Value,
     @"ghostel--set-title": Value,
+    @"ghostel--kitty-graphics-place": Value,
+    @"ghostel--kitty-graphics-delete": Value,
+    @"ghostel--kitty-clear-all": Value,
+    png: Value,
+    pbm: Value,
     ding: Value,
 };
 

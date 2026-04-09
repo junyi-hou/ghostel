@@ -389,7 +389,8 @@ Bump this only when the Elisp code requires a newer native module
 (declare-function ghostel--scroll-top "ghostel-module")
 (declare-function ghostel--set-default-colors "ghostel-module")
 (declare-function ghostel--set-palette "ghostel-module")
-(declare-function ghostel--set-size "ghostel-module")
+(declare-function ghostel--set-size "ghostel-module" (term rows cols &optional cell-w cell-h))
+(declare-function ghostel--scrollback-rows "ghostel-module" (term))
 (declare-function ghostel--write-input "ghostel-module")
 
 
@@ -610,6 +611,12 @@ DIR is the module directory."
 
 (defvar-local ghostel--resize-timer nil
   "Timer for debounced SIGWINCH on alt screen.")
+
+(defvar-local ghostel--kitty-images (make-hash-table :test 'eql)
+  "Cache mapping image-id to Emacs image descriptor.")
+
+(defvar-local ghostel--kitty-placements nil
+  "Active kitty graphics placements: list of (ID ABS-ROW COL COLS ROWS).")
 
 (defvar-local ghostel--last-send-time nil
   "Time of the last `ghostel--send-key' call, for immediate-redraw detection.")
@@ -1051,6 +1058,7 @@ pasted using bracketed paste."
     ;; CSI H = home, CSI 2 J = erase screen, CSI 3 J = erase scrollback.
     (ghostel--write-input ghostel--term "\e[H\e[2J\e[3J")
     (ghostel--scroll-bottom ghostel--term)
+    (ghostel--kitty-clear-all)
     (setq ghostel--force-next-redraw t)
     (ghostel--invalidate)
     ;; Send form-feed to the shell so it redraws its prompt.
@@ -1064,6 +1072,7 @@ pasted using bracketed paste."
     ;; Flush pending process output first so it renders before the clear.
     (ghostel--flush-pending-output)
     (ghostel--write-input ghostel--term "\e[H\e[2J")
+    (ghostel--kitty-clear-all)
     (setq ghostel--force-next-redraw t)
     (ghostel--invalidate)
     ;; Send form-feed to the shell so it redraws its prompt.
@@ -1561,6 +1570,68 @@ Only called by the native renderer when wide characters are present."
                       (put-text-property (- eol hide) eol
                                          'display "")))))))
           (forward-line 1))))))
+
+
+;;; Kitty graphics protocol
+
+(defun ghostel--kitty-graphics-place (image-id abs-row col cols rows data is-png)
+  "Handle a kitty graphics image placement from the native module.
+IMAGE-ID is the integer image identifier.
+ABS-ROW is the absolute row (scrollback + viewport row).
+COL is the 0-based column.
+COLS and ROWS are the cell dimensions of the placement.
+DATA is a unibyte string with the image data (PNG or PPM).
+IS-PNG is non-nil if DATA is PNG format, nil for PPM."
+  (when (display-graphic-p)
+    (condition-case err
+        (let ((img (create-image data (if is-png 'png 'pbm) t
+                                 :width (* cols (frame-char-width))
+                                 :height (* rows (frame-char-height)))))
+          (puthash image-id img ghostel--kitty-images)
+          (push (list image-id abs-row col cols rows) ghostel--kitty-placements))
+      (error (message "ghostel: kitty image error: %S" err)))))
+
+(defun ghostel--kitty-graphics-delete (what &optional image-id)
+  "Handle a kitty graphics delete command from the native module.
+WHAT is a string: \"a\" for all, \"i\" for by IMAGE-ID."
+  (pcase what
+    ("a"
+     (clrhash ghostel--kitty-images)
+     (setq ghostel--kitty-placements nil))
+    ("i"
+     (remhash image-id ghostel--kitty-images)
+     (setq ghostel--kitty-placements
+           (seq-remove (lambda (p) (= (car p) image-id))
+                       ghostel--kitty-placements)))))
+
+(defun ghostel--kitty-clear-all ()
+  "Clear all kitty graphics images and placements."
+  (clrhash ghostel--kitty-images)
+  (setq ghostel--kitty-placements nil))
+
+(defun ghostel--kitty-apply-placements ()
+  "Apply image display properties for active kitty graphics placements.
+Called after `ghostel--redraw' to overlay images on the rendered buffer.
+Placements use absolute row coordinates; this converts to viewport rows
+using the current scrollback offset."
+  (when (and ghostel--kitty-placements (display-graphic-p) ghostel--term)
+    (let ((scrollback (ghostel--scrollback-rows ghostel--term))
+          (viewport-h (count-lines (point-min) (point-max))))
+      (save-excursion
+        (dolist (placement ghostel--kitty-placements)
+          (pcase-let ((`(,id ,abs-row ,col ,cols ,rows) placement))
+            (let ((vp-row (- abs-row scrollback))
+                  (img (gethash id ghostel--kitty-images)))
+              (when (and img (>= vp-row 0) (< vp-row viewport-h))
+                (goto-char (point-min))
+                (when (zerop (forward-line vp-row))
+                  (let ((start (min (+ (point) col) (line-end-position))))
+                    (when (zerop (forward-line (1- rows)))
+                      (let ((end (min (+ (point) col cols)
+                                      (line-end-position))))
+                        (when (< start end)
+                          (put-text-property start end
+                                             'display img))))))))))))))
 
 
 ;;; Prompt navigation (OSC 133)
@@ -2231,7 +2302,8 @@ frame after idle to improve interactive responsiveness."
           (let ((inhibit-read-only t)
                 (inhibit-redisplay t)
                 (inhibit-modification-hooks t))
-            (ghostel--redraw ghostel--term ghostel-full-redraw)))))))
+            (ghostel--redraw ghostel--term ghostel-full-redraw)
+            (ghostel--kitty-apply-placements)))))))
 
 (defun ghostel-force-redraw ()
   "Force a full terminal redraw (for debugging)."
@@ -2261,7 +2333,8 @@ PROCESS is the shell process, WINDOWS is the list of windows."
                                   #'ghostel--resize-settled
                                   (current-buffer) process height width)))
         ;; Primary screen: resize + SIGWINCH + render immediately.
-        (ghostel--set-size ghostel--term height width)
+        (ghostel--set-size ghostel--term height width
+                           (frame-char-width) (frame-char-height))
         (when (process-live-p process)
           (set-process-window-size process height width))
         (setq ghostel--force-next-redraw t)
@@ -2277,7 +2350,8 @@ PROCESS is the shell, HEIGHT and WIDTH the final dimensions."
     (with-current-buffer buffer
       (setq ghostel--resize-timer nil)
       (when ghostel--term
-        (ghostel--set-size ghostel--term height width)
+        (ghostel--set-size ghostel--term height width
+                           (frame-char-width) (frame-char-height))
         (when (and process (process-live-p process))
           (set-process-window-size process height width))
         ;; Render NOW, before returning to the event loop.

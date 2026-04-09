@@ -9,6 +9,7 @@ const Terminal = @import("terminal.zig");
 const gt = @import("ghostty.zig");
 const render = @import("render.zig");
 const input = @import("input.zig");
+const kitty_graphics = @import("kitty_graphics.zig");
 
 const c = emacs.c;
 
@@ -31,7 +32,7 @@ export fn emacs_module_init(runtime: *c.struct_emacs_runtime) callconv(.c) c_int
     // Register functions
     env.bindFunction("ghostel--new", 2, 3, &fnNew, "Create a new ghostel terminal.\n\n(ghostel--new ROWS COLS &optional MAX-SCROLLBACK)");
     env.bindFunction("ghostel--write-input", 2, 2, &fnWriteInput, "Write raw bytes to the terminal.\n\n(ghostel--write-input TERM DATA)");
-    env.bindFunction("ghostel--set-size", 3, 3, &fnSetSize, "Resize the terminal.\n\n(ghostel--set-size TERM ROWS COLS)");
+    env.bindFunction("ghostel--set-size", 3, 5, &fnSetSize, "Resize the terminal.\n\n(ghostel--set-size TERM ROWS COLS &optional CELL-W CELL-H)");
     env.bindFunction("ghostel--get-title", 1, 1, &fnGetTitle, "Get the terminal title.\n\n(ghostel--get-title TERM)");
     env.bindFunction("ghostel--get-pwd", 1, 1, &fnGetPwd, "Get the terminal's working directory from OSC 7.\n\n(ghostel--get-pwd TERM)");
     env.bindFunction("ghostel--redraw", 1, 2, &fnRedraw, "Redraw the terminal into the current buffer.\n\n(ghostel--redraw TERM &optional FULL)");
@@ -50,6 +51,7 @@ export fn emacs_module_init(runtime: *c.struct_emacs_runtime) callconv(.c) c_int
     env.bindFunction("ghostel--redraw-full-scrollback", 1, 1, &fnRedrawFullScrollback, "Render entire scrollback into buffer, return original viewport line.\n\n(ghostel--redraw-full-scrollback TERM)");
     env.bindFunction("ghostel--copy-all-text", 1, 1, &fnCopyAllText, "Return entire scrollback as plain text string.\n\n(ghostel--copy-all-text TERM)");
     env.bindFunction("ghostel--module-version", 0, 0, &fnModuleVersion, "Return the native module version string.\n\n(ghostel--module-version)");
+    env.bindFunction("ghostel--scrollback-rows", 1, 1, &fnScrollbackRows, "Return the number of scrollback rows.\n\n(ghostel--scrollback-rows TERM)");
 
     emacs.initSymbols(env);
     env.provide("ghostel-module");
@@ -153,7 +155,8 @@ fn fnWriteInput(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*
 
     if (extra_cr == 0) {
         // No normalization needed — feed raw data directly.
-        term.vtWrite(raw);
+        // Process via kitty_graphics to intercept APC_G sequences.
+        kitty_graphics.processData(env, term, raw);
     } else {
         // Need to insert \r before bare \n.
         const out_len = raw.len + extra_cr;
@@ -180,7 +183,8 @@ fn fnWriteInput(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*
             norm_buf[npos] = raw[i];
             npos += 1;
         }
-        term.vtWrite(norm_buf[0..npos]);
+        // Process via kitty_graphics to intercept APC_G sequences.
+        kitty_graphics.processData(env, term, norm_buf[0..npos]);
     }
 
     // Scan for OSC sequences that libghostty-vt discards.
@@ -320,8 +324,8 @@ fn extractOsc133(env: emacs.Env, data: []const u8) void {
     }
 }
 
-/// (ghostel--set-size TERM ROWS COLS)
-fn fnSetSize(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*anyopaque) callconv(.c) c.emacs_value {
+/// (ghostel--set-size TERM ROWS COLS &optional CELL-W CELL-H)
+fn fnSetSize(raw_env: ?*c.emacs_env, nargs: isize, args: [*c]c.emacs_value, _: ?*anyopaque) callconv(.c) c.emacs_value {
     const env = emacs.Env.init(raw_env.?);
     const term = env.getUserPtr(Terminal, args[0]) orelse {
         env.signalError("ghostel: invalid terminal handle");
@@ -331,7 +335,17 @@ fn fnSetSize(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*any
     const rows: u16 = @intCast(env.extractInteger(args[1]));
     const cols: u16 = @intCast(env.extractInteger(args[2]));
 
-    term.resize(cols, rows) catch {
+    const cell_w: u32 = if (nargs > 3 and env.isNotNil(args[3]))
+        @intCast(env.extractInteger(args[3]))
+    else
+        term.cell_width_px;
+
+    const cell_h: u32 = if (nargs > 4 and env.isNotNil(args[4]))
+        @intCast(env.extractInteger(args[4]))
+    else
+        term.cell_height_px;
+
+    term.resize(cols, rows, cell_w, cell_h) catch {
         env.signalError("ghostel: resize failed");
         return env.nil();
     };
@@ -729,6 +743,13 @@ fn fnDebugFeed(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*a
 /// (ghostel--cursor-position TERM)
 /// Return the terminal cursor position as (COL . ROW), 0-indexed.
 /// Returns nil when the cursor has no value (e.g. scrolled away).
+/// (ghostel--scrollback-rows TERM)
+fn fnScrollbackRows(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*anyopaque) callconv(.c) c.emacs_value {
+    const env = emacs.Env.init(raw_env.?);
+    const term = env.getUserPtr(Terminal, args[0]) orelse return env.makeInteger(0);
+    return env.makeInteger(@intCast(term.getScrollbackRows()));
+}
+
 fn fnCursorPosition(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*anyopaque) callconv(.c) c.emacs_value {
     const env = emacs.Env.init(raw_env.?);
     const term = env.getUserPtr(Terminal, args[0]) orelse return env.nil();
