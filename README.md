@@ -14,7 +14,7 @@ process, keymap, and buffer.
 - [Installation](#installation)
 - [Building from source](#building-from-source)
 - [Shell Integration](#shell-integration)
-- [Key Bindings](#key-bindings)
+- [Input Modes](#input-modes)
 - [Features](#features)
   - [TRAMP (Remote Terminals)](#tramp-remote-terminals)
 - [Configuration](#configuration)
@@ -155,9 +155,33 @@ test "$INSIDE_EMACS" = 'ghostel'; and source "$EMACS_GHOSTEL_PATH/etc/ghostel.fi
 ```
 </details>
 
-## Key Bindings
+## Input Modes
 
-### Terminal mode
+Ghostel provides four input modes, inspired by
+[eat.el](https://codeberg.org/akib/emacs-eat):
+
+| Mode      | Indicator | Description                            |
+|-----------|-----------|----------------------------------------|
+| Semi-char | *(none)*  | Default — most keys go to terminal     |
+| Char      | `:Char`   | All keys go to terminal                |
+| Copy      | `:Copy`   | Frozen viewport for text selection     |
+| Emacs     | `:Emacs`  | Full scrollback as read-only buffer    |
+
+### Mode switching
+
+| Key       | Action                              |
+|-----------|-------------------------------------|
+| `C-c C-j` | Switch to semi-char (from any mode) |
+| `C-c M-d` | Switch to char mode                 |
+| `M-RET`   | Exit char mode to semi-char         |
+| `C-c C-t` | Toggle copy mode                    |
+| `C-c C-e` | Switch to emacs mode                |
+
+### Semi-char mode (default)
+
+Most keys are sent to the terminal. Keys listed in
+`ghostel-keymap-exceptions` (default: `C-c`, `C-x`, `C-u`, `C-h`,
+`C-g`, `M-x`, `M-o`, `M-:`, `C-\`) pass through to Emacs.
 
 | Key         | Action                                 |
 |-------------|----------------------------------------|
@@ -167,23 +191,30 @@ test "$INSIDE_EMACS" = 'ghostel'; and source "$EMACS_GHOSTEL_PATH/etc/ghostel.fi
 | `C-c C-d`   | Send EOF (C-d)                         |
 | `C-c C-\`   | Send quit (C-\)                        |
 | `C-c C-t`   | Enter copy mode                        |
+| `C-c C-e`   | Enter emacs mode                       |
+| `C-c M-d`   | Enter char mode                        |
 | `C-c M-w`   | Copy entire scrollback to kill ring    |
 | `C-y`       | Yank from kill ring (bracketed paste)  |
 | `M-y`       | Yank-pop (cycle through kill ring)     |
 | `C-c C-y`   | Paste from kill ring                   |
-| `C-c C-l`   | Clear scrollback                       |
+| `C-c M-l`   | Clear scrollback                       |
 | `C-c C-n`   | Jump to next prompt                    |
 | `C-c C-p`   | Jump to previous prompt                |
 | `C-c C-q`   | Send next key literally (escape hatch) |
 | Mouse wheel | Scroll through scrollback              |
 
-Keys listed in `ghostel-keymap-exceptions` (default: `C-c`, `C-x`, `C-u`,
-`C-h`, `C-g`, `M-x`, `M-o`, `M-:`, `C-\`) pass through to Emacs.
+### Char mode
+
+All supported keys are sent directly to the terminal — no exceptions.
+Enter with `C-c M-d`. The only way to exit is `M-RET`, which returns
+to semi-char mode. Useful for TUI apps that need keys like `M-x`,
+`C-x`, or `C-h`.
 
 ### Copy mode
 
-Enter with `C-c C-t`. Standard Emacs navigation works.
-Normal letter keys exit copy mode and send the key to the terminal.
+Enter with `C-c C-t`. The display is frozen and standard Emacs
+navigation works. Normal letter keys exit copy mode and send the
+key to the terminal.
 
 | Key           | Action                           |
 |---------------|----------------------------------|
@@ -195,24 +226,22 @@ Normal letter keys exit copy mode and send the key to the terminal.
 | `C-c C-n`     | Jump to next prompt              |
 | `C-c C-p`     | Jump to previous prompt          |
 | `C-l`         | Recenter viewport                |
-| `C-c C-a`     | Load full scrollback into buffer |
+| `C-c C-e`     | Load full scrollback (emacs mode)|
 | `C-c C-t`     | Exit without copying             |
-| `a`–`z`       | Exit and send key to terminal    |
+| `q`, `a`–`z`  | Exit and send key to terminal    |
 
 Soft-wrapped newlines are automatically stripped from copied text.
 
-After `C-c C-a`, the entire scrollback history is loaded into the buffer
-as styled text. Standard Emacs commands work across the full content:
-`C-x h` to select all, `C-s` to search, mark/region spanning any distance.
+### Emacs mode
 
-Set `ghostel-copy-mode-auto-load-scrollback` to `t` to skip the
-viewport-only step and load the full scrollback immediately when
-entering copy mode. Advantages: produces a pure Emacs buffer where
-all standard commands work (incremental search, `occur`, `M-x
-flush-lines`, etc.) without an extra keystroke. Disadvantages: entering
-copy mode takes longer for large scrollback buffers, clickable links
-(URLs, file references, OSC 8 hyperlinks) are not detected in the
-loaded scrollback.
+Enter with `C-c C-e`. The entire scrollback history is loaded into
+the buffer as styled, read-only text. All standard Emacs commands
+work: `C-s` to search, `occur`, `C-x h` to select all, mark/region
+spanning any distance. Type any character or press `q` to return to
+semi-char mode.
+
+Set `ghostel-copy-mode-auto-load-scrollback` to `t` to go directly
+to emacs mode when pressing `C-c C-t`.
 
 ## Features
 
@@ -415,7 +444,10 @@ individual faces with `M-x customize-face`.
 | `M-x ghostel-other`            | Switch to next terminal or create one        |
 | `M-x ghostel-clear`            | Clear screen and scrollback                  |
 | `M-x ghostel-clear-scrollback` | Clear scrollback only                        |
-| `M-x ghostel-copy-mode`        | Enter copy mode                              |
+| `M-x ghostel-semi-char-mode`   | Switch to semi-char input mode               |
+| `M-x ghostel-char-mode`        | Switch to char input mode                    |
+| `M-x ghostel-copy-mode`        | Toggle copy mode                             |
+| `M-x ghostel-emacs-mode`       | Switch to emacs mode (full scrollback)       |
 | `M-x ghostel-copy-all`         | Copy entire scrollback to kill ring          |
 | `M-x ghostel-paste`            | Paste from kill ring                         |
 | `M-x ghostel-send-next-key`    | Send next key literally                      |
@@ -533,6 +565,7 @@ powering Neovim's built-in terminal.
 | Elisp eval from shell         | Yes       | Yes     |
 | TRAMP remote terminals        | Yes       | Yes     |
 | OSC 52 clipboard              | Yes       | Yes     |
+| Input modes (semi-char/char/copy/emacs) | Yes | No |
 | Copy mode                     | Yes       | Yes     |
 | Drag-and-drop                 | Yes       | No      |
 | Auto module download          | Yes       | No      |
