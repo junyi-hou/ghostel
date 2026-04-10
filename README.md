@@ -195,24 +195,15 @@ Normal letter keys exit copy mode and send the key to the terminal.
 | `C-c C-n`     | Jump to next prompt              |
 | `C-c C-p`     | Jump to previous prompt          |
 | `C-l`         | Recenter viewport                |
-| `C-c C-a`     | Load full scrollback into buffer |
 | `C-c C-t`     | Exit without copying             |
 | `a`–`z`       | Exit and send key to terminal    |
 
 Soft-wrapped newlines are automatically stripped from copied text.
 
-After `C-c C-a`, the entire scrollback history is loaded into the buffer
-as styled text. Standard Emacs commands work across the full content:
-`C-x h` to select all, `C-s` to search, mark/region spanning any distance.
-
-Set `ghostel-copy-mode-auto-load-scrollback` to `t` to skip the
-viewport-only step and load the full scrollback immediately when
-entering copy mode. Advantages: produces a pure Emacs buffer where
-all standard commands work (incremental search, `occur`, `M-x
-flush-lines`, etc.) without an extra keystroke. Disadvantages: entering
-copy mode takes longer for large scrollback buffers, clickable links
-(URLs, file references, OSC 8 hyperlinks) are not detected in the
-loaded scrollback.
+The full scrollback is always rendered into the buffer as styled text,
+so `isearch`, `consult-line`, `occur`, `M-x flush-lines`, `C-x h` to
+select all, and any other buffer-based command work across the full
+history — even outside copy mode.
 
 ## Features
 
@@ -222,7 +213,7 @@ loaded scrollback.
 - Text attributes: bold, italic, faint, underline (single/double/curly/dotted/dashed with color), strikethrough, inverse
 - Cursor styles: block, bar, underline, hollow block
 - Alternate screen buffer (for TUI apps like htop, vim, etc.)
-- Scrollback buffer (configurable, default 20MB (~10,000 lines))
+- Scrollback buffer (configurable, default 5 MB (~5,000 lines), materialized into the Emacs buffer so `isearch`/`consult-line` work over history)
 
 ### Links and File Detection
 - **OSC 8 hyperlinks** — clickable URLs emitted by terminal programs (click or `RET` to open)
@@ -390,7 +381,7 @@ individual faces with `M-x customize-face`.
 | `ghostel-shell-integration`      | `t`                  | Auto-inject shell integration                            |
 | `ghostel-tramp-shell-integration` | `nil`               | Auto-inject shell integration for remote TRAMP sessions  |
 | `ghostel-buffer-name`            | `"*ghostel*"`        | Default buffer name                                      |
-| `ghostel-max-scrollback`         | `20MB`               | Maximum scrollback size in bytes                         |
+| `ghostel-max-scrollback`         | `5MB`                | Maximum scrollback size in bytes (materialized into the Emacs buffer; ~5,000 rows on 80-col terminals) |
 | `ghostel-timer-delay`            | `0.033`              | Base redraw delay in seconds (~30fps)                    |
 | `ghostel-adaptive-fps`           | `t`                  | Adaptive frame rate (shorter delay after idle, stop timer when idle) |
 | `ghostel-immediate-redraw-threshold` | `256`            | Max output bytes to trigger immediate redraw (0 to disable) |
@@ -403,7 +394,6 @@ individual faces with `M-x customize-face`.
 | `ghostel-enable-url-detection`   | `t`                  | Linkify plain-text URLs in terminal output               |
 | `ghostel-enable-file-detection`  | `t`                  | Linkify file:line references in terminal output          |
 | `ghostel-keymap-exceptions`      | `("C-c" "C-x" ...)` | Keys passed through to Emacs                             |
-| `ghostel-copy-mode-auto-load-scrollback` | `nil`        | Load full scrollback automatically when entering copy mode |
 | `ghostel-exit-functions`         | `nil`                | Hook run when the shell process exits                    |
 
 ## Evil-mode
@@ -494,15 +484,17 @@ module), [eat](https://codeberg.org/akib/emacs-eat) (pure Elisp), and Emacs
 built-in `term`.
 
 The primary benchmark streams 1 MB of data through a real process pipe,
-matching actual terminal usage.  Results on Apple M4 Max, Emacs 31.0.50:
+matching actual terminal usage.  All backends are configured with ~1,000
+lines of scrollback (matching vterm's default).  Results on Apple M4 Max,
+Emacs 31.0.50:
 
 | Backend              | Plain ASCII | URL-heavy |
 |----------------------|------------:|----------:|
-| ghostel              |    72 MB/s  |  26 MB/s  |
-| ghostel (no detect)  |    74 MB/s  |  74 MB/s  |
-| vterm                |    33 MB/s  |  27 MB/s  |
-| eat                  |   4.4 MB/s  | 3.4 MB/s  |
-| term                 |   5.4 MB/s  | 4.6 MB/s  |
+| ghostel              |    64 MB/s  |  22 MB/s  |
+| ghostel (no detect)  |    65 MB/s  |  61 MB/s  |
+| vterm                |    28 MB/s  |  23 MB/s  |
+| eat                  |   4.0 MB/s  | 3.1 MB/s  |
+| term                 |   5.0 MB/s  | 4.2 MB/s  |
 
 Ghostel scans terminal output for URLs and file paths, making them clickable.
 The "no detect" row shows throughput with this detection disabled
@@ -565,8 +557,8 @@ powering Neovim's built-in terminal.
 | Copy mode                     | Yes       | Yes     |
 | Drag-and-drop                 | Yes       | No      |
 | Auto module download          | Yes       | No      |
-| Scrollback default            | ~10,000   | 1,000   |
-| PTY throughput (plain ASCII)  | 72 MB/s   | 33 MB/s |
+| Scrollback default            | ~5,000    | 1,000   |
+| PTY throughput (plain ASCII)  | 64 MB/s   | 28 MB/s |
 | Default redraw rate           | ~30 fps   | ~10 fps |
 
 ### Key differences
@@ -593,10 +585,11 @@ bash, zsh, and fish — no shell RC changes needed.  vterm requires manually
 sourcing scripts in your shell configuration.  Both support Elisp eval from
 the shell and TRAMP-aware remote directory tracking.
 
-**Performance.**  In PTY throughput benchmarks (1 MB streamed through `cat`),
-ghostel is roughly 2x faster than vterm on plain ASCII data (72 vs 33 MB/s).
-On URL-heavy output the gap narrows as ghostel's link detection adds overhead,
-but with detection disabled ghostel reaches 74 MB/s.  See the
+**Performance.**  In PTY throughput benchmarks (1 MB streamed through `cat`,
+both backends configured with ~1,000 lines of scrollback), ghostel is roughly
+2x faster than vterm on plain ASCII data (64 vs 28 MB/s).  On URL-heavy
+output the gap narrows as ghostel's link detection adds overhead, but with
+detection disabled ghostel reaches 65 MB/s.  See the
 [Performance](#performance) section above for full numbers and how to run the
 benchmark suite yourself.
 

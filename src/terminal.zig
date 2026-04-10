@@ -30,6 +30,12 @@ mouse_encoder: gt.c.GhosttyMouseEncoder,
 cols: u16,
 rows: u16,
 
+/// Number of libghostty scrollback rows already materialized into the
+/// Emacs buffer above the viewport. Polled on each redraw; kept in sync
+/// by appending newly-scrolled-off rows and trimming rows evicted by
+/// libghostty's scrollback cap.
+scrollback_in_buffer: usize = 0,
+
 /// Cached Emacs env pointer — only valid during a callback from Emacs.
 env: ?emacs.Env = null,
 
@@ -166,12 +172,18 @@ pub fn vtWrite(self: *Self, data: []const u8) void {
 }
 
 /// Resize the terminal.
+///
+/// Resets `scrollback_in_buffer` because libghostty reflows wrapped rows
+/// on resize and the row count above the viewport no longer matches what
+/// we have in the Emacs buffer. The caller is responsible for erasing the
+/// buffer so the next redraw rebuilds scrollback from scratch.
 pub fn resize(self: *Self, cols: u16, rows: u16) !void {
     if (gt.c.ghostty_terminal_resize(self.terminal, cols, rows, 1, 1) != gt.SUCCESS) {
         return error.ResizeFailed;
     }
     self.cols = cols;
     self.rows = rows;
+    self.scrollback_in_buffer = 0;
 }
 
 /// Scroll the viewport.

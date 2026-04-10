@@ -47,7 +47,6 @@ export fn emacs_module_init(runtime: *c.struct_emacs_runtime) callconv(.c) c_int
     env.bindFunction("ghostel--cursor-position", 1, 1, &fnCursorPosition, "Return terminal cursor position as (COL . ROW), 0-indexed.\n\n(ghostel--cursor-position TERM)");
     env.bindFunction("ghostel--debug-state", 1, 1, &fnDebugState, "Return debug info about terminal/render state.\n\n(ghostel--debug-state TERM)");
     env.bindFunction("ghostel--debug-feed", 2, 2, &fnDebugFeed, "Feed STR to terminal and return first row + cursor.\n\n(ghostel--debug-feed TERM STR)");
-    env.bindFunction("ghostel--redraw-full-scrollback", 1, 1, &fnRedrawFullScrollback, "Render entire scrollback into buffer, return original viewport line.\n\n(ghostel--redraw-full-scrollback TERM)");
     env.bindFunction("ghostel--copy-all-text", 1, 1, &fnCopyAllText, "Return entire scrollback as plain text string.\n\n(ghostel--copy-all-text TERM)");
     env.bindFunction("ghostel--module-version", 0, 0, &fnModuleVersion, "Return the native module version string.\n\n(ghostel--module-version)");
 
@@ -74,7 +73,7 @@ fn fnNew(raw_env: ?*c.emacs_env, nargs: isize, args: [*c]c.emacs_value, _: ?*any
     const max_scrollback: usize = if (nargs > 2 and env.isNotNil(args[2]))
         @intCast(env.extractInteger(args[2]))
     else
-        25_000_000; // ~25 MB, roughly 10k lines at standard page density
+        5 * 1024 * 1024; // ~5 MB, roughly 5k rows on an 80-column terminal
 
     const term = std.heap.c_allocator.create(Terminal) catch {
         env.signalError("ghostel: out of memory");
@@ -335,6 +334,9 @@ fn fnSetSize(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*any
         env.signalError("ghostel: resize failed");
         return env.nil();
     };
+    // Reflow invalidates the materialized scrollback region — wipe the
+    // buffer so the next full redraw rebuilds it from libghostty state.
+    env.eraseBuffer();
 
     return env.nil();
 }
@@ -746,16 +748,6 @@ fn fnCursorPosition(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _
     _ = gt.c.ghostty_render_state_get(term.render_state, gt.RS_DATA_CURSOR_VIEWPORT_Y, @ptrCast(&cy));
 
     return env.call2(emacs.sym.cons, env.makeInteger(@as(i64, cx)), env.makeInteger(@as(i64, cy)));
-}
-
-/// (ghostel--redraw-full-scrollback TERM)
-/// Render the entire scrollback into the current buffer.
-/// Returns the 1-based line number of the original viewport position.
-fn fnRedrawFullScrollback(raw_env: ?*c.emacs_env, _: isize, args: [*c]c.emacs_value, _: ?*anyopaque) callconv(.c) c.emacs_value {
-    const env = emacs.Env.init(raw_env.?);
-    const term = env.getUserPtr(Terminal, args[0]) orelse return env.nil();
-    const line = render.redrawFullScrollback(env, term);
-    return env.makeInteger(line);
 }
 
 /// (ghostel--copy-all-text TERM)

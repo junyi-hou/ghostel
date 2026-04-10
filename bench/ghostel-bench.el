@@ -192,8 +192,10 @@ for reliable measurement."
 ;; ---------------------------------------------------------------------------
 
 (defun ghostel-bench--make-ghostel (rows cols)
-  "Create a ghostel terminal for benchmarking."
-  (ghostel--new rows cols ghostel-bench-scrollback))
+  "Create a ghostel terminal for benchmarking.
+`ghostel-bench-scrollback' is in lines (matching vterm/term),
+but `ghostel--new' takes bytes — convert at ~1 KB per row."
+  (ghostel--new rows cols (* ghostel-bench-scrollback 1024)))
 
 (defun ghostel-bench--make-vterm (rows cols)
   "Create a vterm terminal for benchmarking."

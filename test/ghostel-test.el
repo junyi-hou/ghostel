@@ -173,11 +173,105 @@
       (should (string-match-p "line [0-4]" state)))))     ; scrollback shows earlier lines
 
 ;; -----------------------------------------------------------------------
+;; Test: scrollback is materialized into the Emacs buffer (vterm parity)
+;; -----------------------------------------------------------------------
+
+(ert-deftest ghostel-test-scrollback-in-buffer ()
+  "After overflowing the viewport, scrolled-off rows live in the Emacs buffer.
+This is the vterm-style growing-buffer model that lets `isearch' and
+`consult-line' search history without entering copy mode."
+  (let ((buf (generate-new-buffer " *ghostel-test-sb-buffer*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (let* ((term (ghostel--new 5 80 1000))
+                 (inhibit-read-only t))
+            ;; Write 12 lines into a 5-row terminal — 7 should scroll off.
+            (dotimes (i 12)
+              (ghostel--write-input term (format "row-%02d\r\n" i)))
+            (ghostel--redraw term t)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              ;; Earliest row that scrolled off must now live in the buffer.
+              (should (string-match-p "row-00" content))
+              ;; A middle row that scrolled off must also be present.
+              (should (string-match-p "row-05" content))
+              ;; The most recent row is on the active screen.
+              (should (string-match-p "row-11" content)))
+            ;; Buffer line count = scrollback rows + viewport rows.
+            ;; 12 written lines + 1 cursor row = 13 rows total
+            (should (= 13 (count-lines (point-min) (point-max))))))
+      (kill-buffer buf))))
+
+(ert-deftest ghostel-test-scrollback-preserves-url-properties ()
+  "Verify URL text properties survive scrollback promotion.
+When libghostty pushes a row into scrollback, the redraw promotes the
+existing buffer text instead of fetching a fresh copy from libghostty,
+so any text properties the row earned while it was the viewport (URL
+detection, ghostel-prompt) stay attached."
+  (let ((buf (generate-new-buffer " *ghostel-test-sb-url*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (let* ((term (ghostel--new 5 80 1000))
+                 (inhibit-read-only t)
+                 (ghostel-enable-url-detection t)
+                 (ghostel-enable-file-detection nil))
+            ;; Write a row with a URL while it's in the viewport.
+            (ghostel--write-input term "see https://example.com here\r\n")
+            (ghostel--redraw term t)
+            ;; Sanity: detect-urls applied a help-echo while the row is visible.
+            (goto-char (point-min))
+            (let ((url-pos (search-forward "https://example.com" nil t)))
+              (should url-pos)
+              (should (equal "https://example.com"
+                             (get-text-property (- url-pos 19) 'help-echo))))
+            ;; Now scroll the URL row off the active screen.
+            (dotimes (_ 6) (ghostel--write-input term "filler\r\n"))
+            (ghostel--redraw term t)
+            ;; The URL row now lives in the scrollback region of the buffer.
+            (goto-char (point-min))
+            (let ((url-pos (search-forward "https://example.com" nil t)))
+              (should url-pos)
+              ;; The clickable text properties survived the scroll because
+              ;; promotion preserved the buffer text instead of re-fetching
+              ;; from libghostty.
+              (should (equal "https://example.com"
+                             (get-text-property (- url-pos 19) 'help-echo))))))
+      (kill-buffer buf))))
+
+(ert-deftest ghostel-test-scrollback-grows-incrementally ()
+  "Successive redraws append newly-scrolled-off rows without losing history."
+  (let ((buf (generate-new-buffer " *ghostel-test-sb-incr*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (let* ((term (ghostel--new 5 80 1000))
+                 (inhibit-read-only t))
+            ;; First batch: write 8 lines, redraw.
+            (dotimes (i 8)
+              (ghostel--write-input term (format "first-%02d\r\n" i)))
+            (ghostel--redraw term t)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (should (string-match-p "first-00" content))
+              (should (string-match-p "first-07" content)))
+            ;; Second batch: write more lines, redraw again.
+            (dotimes (i 6)
+              (ghostel--write-input term (format "second-%02d\r\n" i)))
+            (ghostel--redraw term t)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              ;; All earlier scrollback rows survive the second redraw.
+              (should (string-match-p "first-00" content))
+              (should (string-match-p "first-07" content))
+              (should (string-match-p "second-00" content))
+              (should (string-match-p "second-05" content)))))
+      (kill-buffer buf))))
+
+;; -----------------------------------------------------------------------
 ;; Test: clear screen (ghostel-clear)
 ;; -----------------------------------------------------------------------
 
 (ert-deftest ghostel-test-clear-screen ()
-  "Test that ghostel-clear clears the visible screen but preserves scrollback."
+  "Test that ghostel-clear clears the visible screen but preserves scrollback.
+With the growing-buffer model the scrollback is always materialized into
+the Emacs buffer, so we just check the buffer text directly instead of
+scrolling libghostty's viewport."
   (let ((buf (generate-new-buffer " *ghostel-test-clear*")))
     (unwind-protect
         (with-current-buffer buf
@@ -211,11 +305,10 @@
             ;; Simulate what delayed-redraw does
             (ghostel--flush-pending-output)
             (let ((inhibit-read-only t)) (ghostel--redraw ghostel--term t))
-            ;; Scrollback should still exist after screen clear
-            (ghostel--scroll ghostel--term -30)
-            (let ((inhibit-read-only t)) (ghostel--redraw ghostel--term t))
+            ;; Scrollback rows live in the buffer above the cleared
+            ;; viewport — search for any clear-test echo to confirm.
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
-              (should (string-match-p "clear-test-0" content))) ; scrollback preserved
+              (should (string-match-p "clear-test-[0-9]+" content)))
             (delete-process proc)))
       (kill-buffer buf))))
 
@@ -1462,52 +1555,6 @@ rendered by `ghostel--delayed-redraw'.  This is the exact real-world path."
       (should (equal '(4) result)))))
 
 ;; -----------------------------------------------------------------------
-;; Test: copy-mode-load-all state management
-;; -----------------------------------------------------------------------
-
-(ert-deftest ghostel-test-copy-mode-load-all ()
-  "Test that `ghostel-copy-mode-load-all' sets full-buffer state."
-  (let ((buf (generate-new-buffer " *ghostel-test-load-all*")))
-    (unwind-protect
-        (with-current-buffer buf
-          (ghostel-mode)
-          (let ((ghostel--copy-mode-active nil)
-                (ghostel--redraw-timer nil)
-                (ghostel--term 'fake-term))
-            ;; Enter copy mode
-            (ghostel-copy-mode)
-            (should ghostel--copy-mode-active)              ; in copy mode
-            (should-not ghostel--copy-mode-full-buffer)     ; not full yet
-            ;; Simulate a 3-line viewport with point on line 2, column 3
-            (let ((inhibit-read-only t))
-              (erase-buffer)
-              (insert "aaa\nbbbXbb\nccc"))
-            (goto-char (point-min))
-            (forward-line 1)
-            (move-to-column 3)                              ; on 'X' in line 2
-            ;; Stub the native function and recenter (no window in batch).
-            ;; The stub must NOT bind inhibit-read-only itself — the real
-            ;; native function doesn't, so the caller must have it set.
-            ;; Returns viewport-line=3 (viewport starts at line 3 in full buffer)
-            (cl-letf (((symbol-function 'ghostel--redraw-full-scrollback)
-                       (lambda (_term)
-                         (erase-buffer)
-                         (insert "sb1\nsb2\naaa\nbbbXbb\nccc")
-                         3))
-                      ((symbol-function 'recenter) #'ignore))
-              (ghostel-copy-mode-load-all)
-              (should ghostel--copy-mode-full-buffer)       ; now full
-              ;; Point should be on line 4 (viewport-line 3 + saved offset 1)
-              (should (= 4 (line-number-at-pos)))           ; preserved line
-              (should (= 3 (current-column))))
-            ;; Exit resets full-buffer state
-            (cl-letf (((symbol-function 'ghostel--scroll-bottom) #'ignore)
-                      ((symbol-function 'ghostel--redraw) #'ignore))
-              (ghostel-copy-mode-exit))
-            (should-not ghostel--copy-mode-full-buffer)))   ; reset on exit
-      (kill-buffer buf))))
-
-;; -----------------------------------------------------------------------
 ;; Test: ghostel-copy-all copies to kill ring
 ;; -----------------------------------------------------------------------
 
@@ -1527,32 +1574,28 @@ rendered by `ghostel--delayed-redraw'.  This is the exact real-world path."
       (kill-buffer buf))))
 
 ;; -----------------------------------------------------------------------
-;; Test: copy-mode scroll commands in full-buffer mode
+;; Test: copy-mode scroll commands use Emacs navigation
 ;; -----------------------------------------------------------------------
 
-(ert-deftest ghostel-test-copy-mode-full-buffer-scroll ()
-  "Test that scroll commands use Emacs navigation in full-buffer mode."
-  (let ((buf (generate-new-buffer " *ghostel-test-full-scroll*")))
+(ert-deftest ghostel-test-copy-mode-buffer-navigation ()
+  "Copy-mode navigation commands operate on the Emacs buffer directly."
+  (let ((buf (generate-new-buffer " *ghostel-test-copy-nav*")))
     (unwind-protect
         (with-current-buffer buf
           (ghostel-mode)
           (let ((ghostel--copy-mode-active t)
-                (ghostel--copy-mode-full-buffer t)
                 (ghostel--term 'fake-term)
                 (inhibit-read-only t))
-            ;; Insert content
             (insert (mapconcat #'number-to-string (number-sequence 1 20) "\n"))
             (goto-char (point-min))
-            ;; Test beginning/end of buffer
             (ghostel-copy-mode-end-of-buffer)
-            (should (= (point) (point-max)))                ; jumped to end
+            (should (= (point) (point-max)))
             (ghostel-copy-mode-beginning-of-buffer)
-            (should (= (point) (point-min)))                ; jumped to beginning
-            ;; Test line navigation
+            (should (= (point) (point-min)))
             (ghostel-copy-mode-next-line)
-            (should (= 2 (line-number-at-pos)))             ; moved to line 2
+            (should (= 2 (line-number-at-pos)))
             (ghostel-copy-mode-previous-line)
-            (should (= 1 (line-number-at-pos)))))           ; moved back to line 1
+            (should (= 1 (line-number-at-pos)))))
       (kill-buffer buf))))
 
 ;; -----------------------------------------------------------------------
@@ -1848,8 +1891,6 @@ rendered by `ghostel--delayed-redraw'.  This is the exact real-world path."
   (let ((ghostel--term 'fake)
         (ghostel--process 'fake)
         (ghostel--copy-mode-active nil)
-        (ghostel--copy-mode-full-buffer nil)
-        (ghostel--force-next-redraw nil)
         (mouse-event-args nil)
         (scroll-called nil)
         ;; Fake wheel-up event at row 5, col 10
@@ -1859,8 +1900,8 @@ rendered by `ghostel--delayed-redraw'.  This is the exact real-world path."
                (lambda (_term action button row col mods)
                  (setq mouse-event-args (list action button row col mods))
                  t))
-              ((symbol-function 'ghostel--scroll)
-               (lambda (_term _delta) (setq scroll-called t)))
+              ((symbol-function 'scroll-down)
+               (lambda (&optional _) (setq scroll-called t)))
               ((symbol-function 'process-live-p) (lambda (_p) t)))
       (ghostel--scroll-up fake-event)
       (should mouse-event-args)
@@ -1876,8 +1917,8 @@ rendered by `ghostel--delayed-redraw'.  This is the exact real-world path."
                  (lambda (_term action button row col mods)
                    (setq mouse-event-args (list action button row col mods))
                    t))
-                ((symbol-function 'ghostel--scroll)
-                 (lambda (_term _delta) (setq scroll-called t)))
+                ((symbol-function 'scroll-up)
+                 (lambda (&optional _) (setq scroll-called t)))
                 ((symbol-function 'process-live-p) (lambda (_p) t)))
         (ghostel--scroll-down fake-down-event)
         (should mouse-event-args)
@@ -1885,29 +1926,25 @@ rendered by `ghostel--delayed-redraw'.  This is the exact real-world path."
         (should-not scroll-called)))))
 
 (ert-deftest ghostel-test-scroll-fallback-no-mouse-tracking ()
-  "Scroll-up/down fall back to viewport scroll when mouse tracking is off."
+  "Scroll-up/down fall back to Emacs window scroll when mouse tracking is off."
   (let ((ghostel--term 'fake)
         (ghostel--process 'fake)
         (ghostel--copy-mode-active nil)
-        (ghostel--copy-mode-full-buffer nil)
-        (ghostel--force-next-redraw nil)
-        (scroll-delta nil)
+        (scroll-down-arg nil)
+        (scroll-up-arg nil)
         (fake-up-event `(wheel-up (,(selected-window) 1 (10 . 5) 0)))
         (fake-down-event `(wheel-down (,(selected-window) 1 (10 . 5) 0))))
     (cl-letf (((symbol-function 'ghostel--mouse-event)
                (lambda (_term _action _button _row _col _mods) nil))
-              ((symbol-function 'ghostel--scroll)
-               (lambda (_term delta) (setq scroll-delta delta)))
-              ((symbol-function 'ghostel--invalidate) #'ignore)
+              ((symbol-function 'scroll-down)
+               (lambda (&optional n) (setq scroll-down-arg n)))
+              ((symbol-function 'scroll-up)
+               (lambda (&optional n) (setq scroll-up-arg n)))
               ((symbol-function 'process-live-p) (lambda (_p) t)))
       (ghostel--scroll-up fake-up-event)
-      (should (equal -3 scroll-delta))
-      (should ghostel--force-next-redraw)
-      ;; Reset and test scroll-down fallback
-      (setq scroll-delta nil ghostel--force-next-redraw nil)
+      (should (equal 3 scroll-down-arg))
       (ghostel--scroll-down fake-down-event)
-      (should (equal 3 scroll-delta))
-      (should ghostel--force-next-redraw))))
+      (should (equal 3 scroll-up-arg)))))
 
 (ert-deftest ghostel-test-control-key-bindings ()
   "All non-exception C-<letter> keys should be bound in ghostel-mode-map."
@@ -1939,67 +1976,12 @@ rendered by `ghostel--delayed-redraw'.  This is the exact real-world path."
 ;; -----------------------------------------------------------------------
 
 (ert-deftest ghostel-test-copy-mode-recenter ()
-  "Recenter scrolls terminal viewport to center the current line."
-  (let ((buf (generate-new-buffer " *ghostel-test-copy-mode-recenter*")))
-    (unwind-protect
-        (with-current-buffer buf
-          (dotimes (i 20) (insert (format "line-%02d" i) (make-string 33 ?x) "\n"))
-          (setq ghostel--term 'fake-term)
-          (setq ghostel--copy-mode-active t)
-          (setq buffer-read-only t)
-          (let ((scroll-delta nil)
-                (redraw-called nil)
-                (recenter-called nil))
-            ;; Mock redraw that changes the first line (simulates viewport shift).
-            (cl-letf (((symbol-function 'ghostel--scroll)
-                       (lambda (_term delta) (setq scroll-delta delta)))
-                      ((symbol-function 'ghostel--redraw)
-                       (lambda (_term _full)
-                         (setq redraw-called t)
-                         (save-excursion
-                           (goto-char (point-min))
-                           (delete-char 1)
-                           (insert "!"))))
-                      ((symbol-function 'window-body-height)
-                       (lambda (&rest _) 20))
-                      ((symbol-function 'recenter)
-                       (lambda (&rest _) (setq recenter-called t))))
-              ;; Point on line 5 (above center 10) → scroll viewport up
-              (goto-char (point-min))
-              (forward-line 4)
-              (ghostel-copy-mode-recenter)
-              (should (equal -5 scroll-delta))
-              (should redraw-called)
-              (should recenter-called))
-
-            ;; Mock redraw that does NOT change buffer (simulates clamped scroll).
-            (cl-letf (((symbol-function 'ghostel--scroll)
-                       (lambda (_term delta) (setq scroll-delta delta)))
-                      ((symbol-function 'ghostel--redraw)
-                       (lambda (_term _full) (setq redraw-called t)))
-                      ((symbol-function 'window-body-height)
-                       (lambda (&rest _) 20))
-                      ((symbol-function 'recenter)
-                       (lambda (&rest _) (setq recenter-called t))))
-              ;; Point on line 15 (below center), scroll clamped → no-op
-              (setq scroll-delta nil redraw-called nil recenter-called nil)
-              (goto-char (point-min))
-              (forward-line 14)
-              (ghostel-copy-mode-recenter)
-              (should (equal 5 scroll-delta))
-              (should redraw-called)
-              (should-not recenter-called)
-              (should (= 15 (line-number-at-pos)))
-
-              ;; Point on line 10 (at center) → no scroll at all
-              (setq scroll-delta nil redraw-called nil recenter-called nil)
-              (goto-char (point-min))
-              (forward-line 9)
-              (ghostel-copy-mode-recenter)
-              (should-not scroll-delta)
-              (should-not redraw-called)
-              (should-not recenter-called))))
-      (kill-buffer buf))))
+  "Copy-mode recenter delegates to the standard `recenter' command."
+  (let ((called nil))
+    (cl-letf (((symbol-function 'recenter)
+               (lambda (&rest _) (setq called t))))
+      (ghostel-copy-mode-recenter)
+      (should called))))
 
 ;; -----------------------------------------------------------------------
 ;; Test: ghostel-send-next-key
@@ -2382,9 +2364,8 @@ while :; do sleep 0.1; done'\n")
     ghostel-test-copy-mode-hl-line
     ghostel-test-project-buffer-name
     ghostel-test-project-universal-arg
-    ghostel-test-copy-mode-load-all
     ghostel-test-copy-all
-    ghostel-test-copy-mode-full-buffer-scroll
+    ghostel-test-copy-mode-buffer-navigation
     ghostel-test-package-version
     ghostel-test-module-version-match
     ghostel-test-module-version-mismatch
