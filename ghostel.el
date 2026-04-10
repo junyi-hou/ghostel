@@ -1985,11 +1985,21 @@ When `default-directory' is a remote TRAMP path, consult
     (insert content)
     (write-region (point-min) (point-max) tramp-path nil 'silent)))
 
+(defun ghostel--cleanup-temp-paths (files dirs)
+  "Delete temporary FILES and DIRS created for remote shell integration.
+Directories are removed recursively so any contents written into them,
+such as a per-session `.zshenv', are cleaned up as well."
+  (dolist (f files)
+    (ignore-errors (delete-file f)))
+  (dolist (d dirs)
+    (ignore-errors (delete-directory d t))))
+
 (defun ghostel--setup-remote-integration (shell-type)
   "Set up shell integration on the remote host for SHELL-TYPE.
 Reads the local integration script, writes it (with any necessary
 preamble) to a temporary file on the remote host, and returns a
-plist (:env :args :stty :temp-files) for `ghostel--start-process'.
+plist (:env :args :stty :temp-files :temp-dirs) for
+`ghostel--start-process'.
 Returns nil on failure."
   (condition-case err
       (let* ((remote-prefix (file-remote-p default-directory))
@@ -2054,7 +2064,7 @@ Returns nil on failure."
                                           "}\n"))
              (list :env (list (format "ZDOTDIR=%s" remote-dir))
                    :args nil :stty "erase '^?' iutf8"
-                   :temp-files (list temp-zshenv temp-dir))))
+                   :temp-dirs (list temp-dir))))
           ;; Fish: -C runs after config, so just source the script.
           ('fish
            (let* ((temp (make-temp-file
@@ -2193,8 +2203,9 @@ on the remote host."
                 :filter #'ghostel--filter
                 :sentinel #'ghostel--sentinel)))
     (when remote-integration
-      (dolist (f (plist-get remote-integration :temp-files))
-        (ignore-errors (delete-file f))))
+      (ghostel--cleanup-temp-paths
+       (plist-get remote-integration :temp-files)
+       (plist-get remote-integration :temp-dirs)))
     (setq ghostel--process proc)
     ;; Raw binary I/O — no encoding/decoding by Emacs
     (set-process-coding-system proc 'binary 'binary)

@@ -13,6 +13,8 @@
 (require 'ert)
 (require 'ghostel)
 
+(declare-function ghostel--cleanup-temp-paths "ghostel")
+
 ;;; Helper: read first N rows from render state via debug-state
 
 (defun ghostel-test--row0 (term)
@@ -535,6 +537,26 @@ cell, so the visual line width must equal the terminal column count."
 
             (delete-process proc)))
       (kill-buffer buf))))
+
+(ert-deftest ghostel-test-cleanup-temp-paths-handles-files-and-dirs ()
+  "`ghostel--cleanup-temp-paths' deletes files and recursively deletes dirs.
+Mirrors the real zsh case where the directory still contains a
+`.zshenv' at cleanup time."
+  (let* ((dir (make-temp-file "ghostel-test-" t))
+         (nested (expand-file-name ".zshenv" dir))
+         (standalone (make-temp-file "ghostel-test-")))
+    (unwind-protect
+        (progn
+          (with-temp-file nested (insert "# test"))
+          (should (file-exists-p nested))
+          (should (file-directory-p dir))
+          (should (file-exists-p standalone))
+          (ghostel--cleanup-temp-paths (list standalone) (list dir))
+          (should-not (file-exists-p standalone))
+          (should-not (file-exists-p nested))
+          (should-not (file-directory-p dir)))
+      (ignore-errors (delete-file standalone))
+      (ignore-errors (delete-directory dir t)))))
 
 ;; -----------------------------------------------------------------------
 ;; Test: encode-key with kitty keyboard protocol active
