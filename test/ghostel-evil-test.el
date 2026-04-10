@@ -351,6 +351,24 @@ Uses mocks for native functions."
        (should (cl-find '("u" . "ctrl") keys-sent :test #'equal))
        (should (cl-find '("e" . "ctrl") keys-sent :test #'equal))))))
 
+(ert-deftest ghostel-evil-test-delete-char ()
+  "Test that `evil-delete-char' (x) works without error.
+Regression: yank-handler arg was not optional in advice signature,
+so calls from `evil-delete-char' (which passes only 4 args to
+`evil-delete') raised `wrong-number-of-arguments'."
+  (ghostel-evil-test--with-evil-buffer
+   (setq-local ghostel--term t)
+   (insert "hello")
+   (goto-char (point-min))
+   (cl-letf (((symbol-function 'ghostel--mode-enabled) (lambda (&rest _) nil))
+             ((symbol-function 'ghostel--cursor-position) (lambda (_) '(0 . 0)))
+             ((symbol-function 'ghostel-evil--cursor-to-point) #'ignore)
+             ((symbol-function 'ghostel--send-encoded) #'ignore))
+     (evil-normal-state)
+     ;; evil-delete-char calls evil-delete without yank-handler
+     (evil-delete-char 1 2 'exclusive nil)
+     (should (eq evil-state 'normal)))))
+
 ;; -----------------------------------------------------------------------
 ;; Test: evil-change advice
 ;; -----------------------------------------------------------------------
@@ -559,6 +577,7 @@ Prevents up/down arrows being sent as history navigation."
     ghostel-evil-test-advice-no-op-outside-ghostel
     ghostel-evil-test-delete-sends-backspace-keys
     ghostel-evil-test-delete-line-sends-ctrl-u
+    ghostel-evil-test-delete-char
     ghostel-evil-test-change-deletes-and-inserts
     ghostel-evil-test-replace-deletes-and-inserts
     ghostel-evil-test-paste-after
