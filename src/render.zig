@@ -655,8 +655,13 @@ fn insertScrollbackRange(
             // instead of two. This saves one Elisp FFI round-trip per
             // inserted row, which is the dominant per-row cost in this
             // hot loop. Style runs only cover the row's cells, so the
-            // unstyled trailing \n is harmless to insertAndStyle.
-            if (content.byte_len < text_buf.len) {
+            // unstyled trailing \n is harmless to insertAndStyle. If the
+            // row exactly filled text_buf, fall back to a separate
+            // env.insert("\n") so the "one row per line" invariant
+            // (relied on by the `after_insert - 1` property math below)
+            // always holds.
+            const newline_in_buf = content.byte_len < text_buf.len;
+            if (newline_in_buf) {
                 text_buf[content.byte_len] = '\n';
                 content.byte_len += 1;
                 content.char_len += 1;
@@ -664,6 +669,9 @@ fn insertScrollbackRange(
 
             const row_start = env.extractInteger(env.point());
             insertAndStyle(env, &text_buf, content, &runs, run_count, default_fg, default_bg);
+            if (!newline_in_buf) {
+                env.insert("\n");
+            }
             const after_insert = env.extractInteger(env.point());
 
             if (content.prompt_char_len > 0) {
