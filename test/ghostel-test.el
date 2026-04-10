@@ -263,6 +263,54 @@ detection, ghostel-prompt) stay attached."
               (should (string-match-p "second-05" content)))))
       (kill-buffer buf))))
 
+(ert-deftest ghostel-test-scrollback-rotation-rebuild ()
+  "Verify cap rotation triggers a rebuild so the buffer reflects libghostty.
+The test fills libghostty past its scrollback cap with EARLY markers,
+redraws once so the buffer matches the current libghostty state, then
+writes a much bigger batch of LATE markers (without an intervening
+redraw).  When the next redraw runs, libghostty's `total_rows' is
+plateaued at the cap so the normal delta-detection sees nothing to do
+— the rotation-detect path must kick in, notice the first scrollback
+row's hash has changed, erase the buffer, and let the bootstrap fetch
+re-sync from libghostty so the buffer reflects the LATE rows."
+  (let ((buf (generate-new-buffer " *ghostel-test-sb-rotate*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (let* (;; 4 KB cap empirically holds ~920 rows of short content
+                 ;; in libghostty's compact storage.
+                 (term (ghostel--new 5 80 (* 4 1024)))
+                 (inhibit-read-only t))
+            ;; Phase 1: write 5000 EARLY rows. libghostty's scrollback
+            ;; saturates at ~920 rows so the surviving rows are
+            ;; early-04080..early-04999 (the most recent 920 of 5000).
+            (dotimes (i 5000)
+              (ghostel--write-input term (format "early-%05d\r\n" i)))
+            (ghostel--redraw term t)
+            ;; After this redraw, buffer's scrollback_in_buffer matches
+            ;; libghostty's count (~920) and contains those high-numbered
+            ;; early rows.
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (should (string-match-p "early-04999" content)))
+            ;; Phase 2: write 5000 LATE rows WITHOUT redrawing in
+            ;; between. libghostty rotates: every new write evicts an
+            ;; early row and pushes a late row. After 5000 writes, all
+            ;; survivors are late-* (since 5000 > 920 cap).
+            (dotimes (i 5000)
+              (ghostel--write-input term (format "late-%05d\r\n" i)))
+            ;; Final redraw: total_rows hasn't changed (libghostty is
+            ;; still at the cap) but the content has fully rotated.
+            ;; Without rotation-detect this would be a no-op and the
+            ;; buffer would still show early-* rows.
+            (ghostel--redraw term t)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              ;; Late rows must be present (libghostty kept the most
+              ;; recent ones, the rebuild fetched them into the buffer).
+              (should (string-match-p "late-04999" content))
+              ;; Early rows must NOT be present anywhere — libghostty
+              ;; evicted them AND the rebuild flushed our stale copy.
+              (should-not (string-match-p "early-" content)))))
+      (kill-buffer buf))))
+
 ;; -----------------------------------------------------------------------
 ;; Test: clear screen (ghostel-clear)
 ;; -----------------------------------------------------------------------
